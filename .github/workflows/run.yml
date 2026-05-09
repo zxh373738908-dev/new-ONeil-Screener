@@ -4,7 +4,7 @@ on:
   schedule:
    
     # 你的日常更新时间
-    - cron: '19 4 * * 1-5'
+    - cron: '49 3 * * 1-5'
     - cron: '16 6 * * 1-5'
     - cron: '16 7 * * 1-5'
   workflow_dispatch:
