@@ -1,0 +1,76 @@
+name: US Stocks Screener (Auto DST)
+
+on:
+  schedule:
+    # 涵盖 :06 分的触发点 (对应 15:06 ET 的夏令和冬令 UTC 时间)
+    - cron: '6 19,20 * * 1-5'
+    # 涵盖 :16 分的触发点 (对应 12:16, 16:16 ET 的夏令和冬令 UTC 时间)
+    - cron: '16 16,17,20,21 * * 1-5'
+  workflow_dispatch: 
+    # 允许你在 GitHub 网页端手动点击 "Run workflow" 按钮来测试
+
+jobs:
+  run-us-screener:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check US Eastern Time
+        id: time_check
+        run: |
+          CURRENT_TIME=$(TZ="America/New_York" date +"%H:%M")
+          EVENT_NAME="${{ github.event_name }}"
+          echo "当前美东时间 (ET) 为: $CURRENT_TIME"
+          echo "触发方式为: $EVENT_NAME"
+          
+          # 如果是手动点击运行，则无视时间，直接执行
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "检测到手动触发，跳过时间限制，准备运行！"
+            echo "RUN_SCRIPT=true" >> $GITHUB_ENV
+            
+          # 如果是定时任务，则判断是否是美东时间 12:16, 15:06, 16:16
+          elif [[ "$CURRENT_TIME" == "12:16" || "$CURRENT_TIME" == "15:06" || "$CURRENT_TIME" == "16:16" ]]; then
+            echo "到达目标时间，准备运行策略！"
+            echo "RUN_SCRIPT=true" >> $GITHUB_ENV
+            
+          # 如果都不是，直接跳过后面的步骤
+          else
+            echo "非目标时间（夏冬令时偏移触发），直接跳过。"
+            echo "RUN_SCRIPT=false" >> $GITHUB_ENV
+          fi
+
+      - name: Set up Python
+        if: env.RUN_SCRIPT == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        if: env.RUN_SCRIPT == 'true'
+        run: |
+          echo "正在检查代码目录文件列表："
+          ls -la
+          
+          # 注意：这里 if 和[ 之间加了空格，已经修复！
+          if [ -f "requirements.txt" ]; then
+            echo "找到 requirements.txt，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 严重错误: 找不到 requirements.txt 文件！"
+            exit 1
+          fi
+
+      - name: Create credentials.json
+        if: env.RUN_SCRIPT == 'true'
+        run: |
+          echo '${{ secrets.GCP_CREDENTIALS }}' > credentials.json
+
+      - name: Run US Screener
+        if: env.RUN_SCRIPT == 'true'
+        run: python run_us.py
+
+      - name: Cleanup credentials
+        if: always() && env.RUN_SCRIPT == 'true'
+        run: rm -f credentials.json
