@@ -1,0 +1,8 @@
+yfinance>=0.2.54
+pandas
+gspread
+google-auth
+lxml
+html5lib
+akshare
+polygon-api-client
