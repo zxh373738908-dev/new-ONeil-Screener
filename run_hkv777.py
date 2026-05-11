@@ -29,7 +29,7 @@ FALLBACK_UNIVERSE = HK_MONOPOLY_TICKERS +[
     "1177", "1997", "2313", "2318", "2333", "3328", "3968", "6618", "6862", "9999"
 ]
 
-EXCLUDED_INDUSTRIES =['Banks', 'Insurance', 'Real Estate']
+EXCLUDED_INDUSTRIES = ['Banks', 'Insurance', 'Real Estate']
 MAX_PER_SECTOR = 3  
 
 # ==========================================
@@ -114,7 +114,7 @@ def fetch_fundamental_data(c):
 # 4. 🚀 主引擎: 港股 V80.9 先勝後戰版
 # ==========================================
 def run_hk_right_side_momentum():
-    print("\n" + "="*50 + "\n🚀[策略 HK: V80.9 宗師極速優化版] 啟動...")
+    print("\n" + "="*50 + "\n🚀 [策略 HK: V80.9 宗師極速優化版] 啟動...")
     
     try:
         vix = float(yf.download("^VHSI", period="5d", progress=False)['Close'].iloc[-1])
@@ -141,7 +141,7 @@ def run_hk_right_side_momentum():
     
     if not stats_list:
         print("❌ 未抓取到有效數據。")
-        return # <=== 語法錯誤修復在這裡！
+        return
 
     df_stats = pd.DataFrame(stats_list)
     for col, period in[('20R', 'r20'), ('60R', 'r60'), ('120R', 'r120')]:
@@ -157,7 +157,9 @@ def run_hk_right_side_momentum():
         
         if row['RPS'] < 70 or curr_p < ma50: continue
 
-        sparkline_cmd = f'=SPARKLINE({{{",".join([str(round(p,2)) for p in close.tail(60).tolist()])}}}, {{"charttype","line";"color","#27AE60"}})'
+        # 【優化防錯點 1】：將價格字串獨立組裝，避免 f-string 複雜解析造成 Syntax Error
+        prices_str = ",".join([str(round(p, 2)) for p in close.tail(60).tolist()])
+        sparkline_cmd = f'=SPARKLINE({{{prices_str}}}, {{"charttype","line";"color","#27AE60"}})'
 
         raw_cands.append({
             "T": row['T'], "YF_T": row['YF_T'], "P": curr_p, "RPS": row['RPS'], "EMA20": ema20,
@@ -190,6 +192,34 @@ def run_hk_right_side_momentum():
             else: action = f"觀察(距買點{r['Dist']:.1f}%)"
             
             t_display = ("🐺" if sector_map.get(r['Sec'], 0) >= 3 else "") + r['T']
-            top10.append([
-                f"T{len(top10)+1}", t_display, r['Sec'], round(r['P'], 2), f"{r['1D']:.1f}%", f"{r['ADR']:.1f}%",
-                f"{r['Bias']:.1f}%", r['Trend'], f"{r['RPS']:.1f}", r['Msg'], f"{r['Score']:.1f}", action
+            
+            # 【優化防錯點 2】：將裝載陣列打散定義，徹底消滅 '[' was never closed 的報錯風險
+            row_data =[
+                f"T{len(top10)+1}",
+                t_display,
+                r['Sec'],
+                round(r['P'], 2),
+                f"{r['1D']:.1f}%",
+                f"{r['ADR']:.1f}%",
+                f"{r['Bias']:.1f}%",
+                r['Trend'],
+                f"{r['RPS']:.1f}",
+                r['Msg'],
+                f"{r['Score']:.1f}",
+                action
+            ]
+            top10.append(row_data)
+            sector_counts[r['Sec']] = sector_counts.get(r['Sec'], 0) + 1
+            
+        if len(top10) >= 10: break
+
+    tz = datetime.timezone(datetime.timedelta(hours=8))
+    
+    # 【優化防錯點 3】：將表頭陣列也獨立換行定義
+    header_row1 =["🏰 V80.9 Master Sniper 港股先勝後戰版", "更新:", datetime.datetime.now(tz).strftime('%m-%d %H:%M'), "VHSI(恐慌):", f"{vix:.1f}", "戰略:", "先勝後戰", "", "", "", "", ""]
+    header_row2 =["排名", "代碼", "板塊", "現價", "1D%", "ADR", "50MA乖離", "60日趨勢", "RPS總分", "基本面", "評分", "作戰指令"]
+    
+    sync_to_google_sheet("🚀港股_動能成長", [header_row1, header_row2] + top10)
+
+if __name__ == "__main__":
+    run_hk_right_side_momentum()
