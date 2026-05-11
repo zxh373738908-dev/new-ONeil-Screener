@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore')
 # 1. 配置中心 (請務必填入你的 Google URL)
 # ==========================================
 # 填入你之前在 Google Apps Script 獲取的網址
-WEBAPP_URL = "你的_GOOGLE_SCRIPT_URL" 
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbw_f6Uy1OMIIl-4mLsAaxe1rXr64qYf2j0RHoKl3-xu0QOp-5kqFpk9rTBIV9Yf5-kz/exec" 
 
 # A 股核心戰略池 (精選各賽道最強龍頭)
 CORE_UNIVERSE = [
