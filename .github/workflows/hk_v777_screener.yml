@@ -1,0 +1,61 @@
+name: HKv777Screener
+
+on:
+  schedule:
+    # GitHub Actions 使用 UTC 時間，香港時間 (HKT) = UTC + 8
+    # 04:00 UTC = 12:00 HKT (中午休市)
+    # 07:45 UTC = 15:45 HKT (尾盤買點確認)
+    # 08:15 UTC = 16:15 HKT (收盤總結)
+    - cron: '0 4 * * 1-5'
+    - cron: '45 7 * * 1-5'
+    - cron: '15 8 * * 1-5'
+  workflow_dispatch: 
+    # 允許手動強制運行
+
+jobs:
+  run-hk777-screener:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Hong Kong Time
+        id: time_check
+        run: |
+          CURRENT_TIME=$(TZ="Asia/Hong_Kong" date +"%H:%M")
+          EVENT_NAME="${{ github.event_name }}"
+          echo "當前香港時間 (HKT) 為: $CURRENT_TIME"
+          echo "觸發方式為: $EVENT_NAME"
+          
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "檢測到手動觸發，跳過時間限制，準備運行！"
+            echo "RUN_SCRIPT=true" >> $GITHUB_ENV
+            
+          # 允許前後 5 分鐘容差（GitHub Actions 有時排隊會延遲）
+          elif [[ "$CURRENT_TIME" > "11:55" && "$CURRENT_TIME" < "12:10" ]] || \
+               [[ "$CURRENT_TIME" > "15:40" && "$CURRENT_TIME" < "15:55" ]] || \
+               [[ "$CURRENT_TIME" > "16:10" && "$CURRENT_TIME" < "16:25" ]]; then
+            echo "到達目標時間，準備運行 HKv777 港股策略！"
+            echo "RUN_SCRIPT=true" >> $GITHUB_ENV
+            
+          else
+            echo "非目標時間，直接跳過。"
+            echo "RUN_SCRIPT=false" >> $GITHUB_ENV
+          fi
+
+      - name: Set up Python
+        if: env.RUN_SCRIPT == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        if: env.RUN_SCRIPT == 'true'
+        run: |
+          pip install yfinance pandas numpy requests
+
+      # 執行港股 V777 腳本 (確保您的檔名叫 run_hkv777.py)
+      - name: Run HK777Screener
+        if: env.RUN_SCRIPT == 'true'
+        run: python run_hkv777.py
