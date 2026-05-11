@@ -72,13 +72,12 @@ def format_hk_tickers(ticker_list):
 # 3. 基本面併發獲取引擎 (V80.9 優化)
 # ==========================================
 def fetch_fundamental_data(c):
-    """多線程抓取單檔股票的基本面信息，大幅提升整體速度"""
+    """多線程抓取單檔股票的基本面信息"""
     try:
-        time.sleep(0.1) # 輕微延遲，防止 Yahoo Finance 429 擋 IP
+        time.sleep(0.1)
         info = yf.Ticker(c['YF_T']).info
         sec = str(info.get('sector', 'Unknown'))
         
-        # 排除指定板塊
         if any(ex.lower() in sec.lower() for ex in EXCLUDED_INDUSTRIES): return None
         
         rev_g = safe_get(info, 'revenueGrowth') * 100
@@ -86,7 +85,6 @@ def fetch_fundamental_data(c):
         div_yield = safe_get(info, 'dividendYield') * 100
         is_tech = 'Technology' in sec or 'Communication' in sec or 'Software' in str(info.get('industry', ''))
         
-        # 港股特色基本面評分邏輯
         if is_tech:
             fin_score, msg_prefix = rev_g + op_m, "R40"
         elif div_yield > 4.0:
@@ -99,15 +97,13 @@ def fetch_fundamental_data(c):
             c['Fin_S'] = fin_score
             c['Msg'] = f"{msg_prefix}({fin_score:.0f}%)" + (" 💎" if c['Tight'] < 3.5 else "")
             
-            # --- 宗師「先勝後戰」評分核心 ---
             dist = abs(c['P'] - c['EMA20']) / c['P'] * 100
             score = (c['RPS'] * 0.5) + (min(fin_score, 100) * 0.15)
             
-            # 技術面加減分
-            if dist < 1.5: score += 40             # 狙擊位大加分
-            if c['Bias'] > 15: score -= (c['Bias'] - 15) * 8 # 港股嚴懲追高
-            if c['Tight'] < 3.0: score += 15       # 價格收斂加分
-            if c['RVOL'] > 2.0: score += 10        # 爆量突破加分
+            if dist < 1.5: score += 40             
+            if c['Bias'] > 15: score -= (c['Bias'] - 15) * 8 
+            if c['Tight'] < 3.0: score += 15       
+            if c['RVOL'] > 2.0: score += 10        
             
             c['Score'], c['Dist'] = score, dist
             return c
@@ -135,7 +131,6 @@ def run_hk_right_side_momentum():
         if df.empty or len(df) < 200: continue
         close, vol = df['Close'], df['Volume']
         
-        # 流動性與仙股裝甲
         if close.iloc[-1] < 1.0 or vol.tail(10).mean() < 2000000: continue
 
         stats_list.append({
@@ -145,7 +140,8 @@ def run_hk_right_side_momentum():
         })
     
     if not stats_list:
-        print("❌ 未抓取到有效數據。") return
+        print("❌ 未抓取到有效數據。")
+        return # <=== 語法錯誤修復在這裡！
 
     df_stats = pd.DataFrame(stats_list)
     for col, period in[('20R', 'r20'), ('60R', 'r60'), ('120R', 'r120')]:
@@ -153,7 +149,6 @@ def run_hk_right_side_momentum():
         
     df_stats['RPS'] = (df_stats['20R'] * 0.3) + (df_stats['60R'] * 0.4) + (df_stats['120R'] * 0.3)
 
-    # 1. 快速技術面初篩
     raw_cands =[]
     for _, row in df_stats.iterrows():
         df, close = row['df'], row['close']
@@ -162,7 +157,6 @@ def run_hk_right_side_momentum():
         
         if row['RPS'] < 70 or curr_p < ma50: continue
 
-        # 【視覺優化】：綠漲紅跌，使用經典多頭綠色 (#27AE60)
         sparkline_cmd = f'=SPARKLINE({{{",".join([str(round(p,2)) for p in close.tail(60).tolist()])}}}, {{"charttype","line";"color","#27AE60"}})'
 
         raw_cands.append({
@@ -174,22 +168,18 @@ def run_hk_right_side_momentum():
             "Trend": sparkline_cmd
         })
 
-    # 取 RPS 最高的前 65 檔
     top_cands = sorted(raw_cands, key=lambda x: x['RPS'], reverse=True)[:65]
     print(f"🔬 啟動多線程基本面掃描 (共 {len(top_cands)} 隻)，這將非常快...")
 
-    # 2. 多線程併發獲取基本面 (提速核心)
     final_pool =[]
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         results = executor.map(fetch_fundamental_data, top_cands)
         for res in results:
             if res is not None: final_pool.append(res)
 
-    # 3. 戰略分級與輸出
     sorted_final = sorted(final_pool, key=lambda x: x['Score'], reverse=True)
     top10, sector_counts, sector_map =[], {}, {}
     
-    # 統計板塊熱度
     for r in sorted_final: sector_map[r['Sec']] = sector_map.get(r['Sec'], 0) + 1
 
     for r in sorted_final:
@@ -203,16 +193,3 @@ def run_hk_right_side_momentum():
             top10.append([
                 f"T{len(top10)+1}", t_display, r['Sec'], round(r['P'], 2), f"{r['1D']:.1f}%", f"{r['ADR']:.1f}%",
                 f"{r['Bias']:.1f}%", r['Trend'], f"{r['RPS']:.1f}", r['Msg'], f"{r['Score']:.1f}", action
-            ])
-            sector_counts[r['Sec']] = sector_counts.get(r['Sec'], 0) + 1
-        if len(top10) >= 10: break
-
-    # 寫入 Google Sheet
-    tz = datetime.timezone(datetime.timedelta(hours=8))
-    # 【戰略回歸】：先勝後戰
-    header = [["🏰 V80.9 Master Sniper 港股先勝後戰版", "更新:", datetime.datetime.now(tz).strftime('%m-%d %H:%M'), "VHSI(恐慌):", f"{vix:.1f}", "戰略:", "先勝後戰", "", "", "", "", ""],["排名", "代碼", "板塊", "現價", "1D%", "ADR", "50MA乖離", "60日趨勢", "RPS總分", "基本面", "評分", "作戰指令"]
-    ]
-    sync_to_google_sheet("🚀港股_動能成長", header + top10)
-
-if __name__ == "__main__":
-    run_hk_right_side_momentum()
