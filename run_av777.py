@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # 1. 配置中心 (核心 A 股池)
 # ==========================================
-WEBAPP_URL = "你的_GOOGLE_SCRIPT_URL" 
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbw_f6Uy1OMIIl-4mLsAaxe1rXr64qYf2j0RHoKl3-xu0QOp-5kqFpk9rTBIV9Yf5-kz/exec" 
 
 # A 股戰略核心池 (包含各賽道真正具有「勝算」的領頭羊)
 CORE_UNIVERSE = [
