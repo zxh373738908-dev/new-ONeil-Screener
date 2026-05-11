@@ -1,0 +1,73 @@
+name: USv777 Stocks Screener
+
+on:
+  schedule:
+    # 涵盖 15:06 ET 的夏令和冬令 UTC 时间 (UTC 19:06, 20:06)
+    - cron: '6 19,20 * * 1-5'
+    # 涵盖 12:16, 16:16 ET 的夏令和冬令 UTC 时间 (UTC 16:16, 17:16, 20:16, 21:16)
+    - cron: '16 16,17,20,21 * * 1-5'
+  workflow_dispatch: 
+    # 允许网页端手动点击运行测试
+
+jobs:
+  run-us-screener:
+    runs-on: ubuntu-latest
+    steps:
+      # 第1步：拉取代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 第2步：智能时间检查（自动处理夏冬令时，且兼容手动触发）
+      - name: Check US Eastern Time
+        id: time_check
+        run: |
+          CURRENT_TIME=$(TZ="America/New_York" date +"%H:%M")
+          EVENT_NAME="${{ github.event_name }}"
+          echo "当前美东时间 (ET) 为: $CURRENT_TIME"
+          echo "触发方式为: $EVENT_NAME"
+          
+          # 如果是手动点击运行，则无视时间，直接执行
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "检测到手动触发，跳过时间限制，准备运行！"
+            echo "RUN_SCRIPT=true" >> $GITHUB_ENV
+            
+          # 定时任务：判断是否刚好是美东时间 12:16, 15:06, 16:16
+          elif [[ "$CURRENT_TIME" == "12:16" || "$CURRENT_TIME" == "15:06" || "$CURRENT_TIME" == "16:16" ]]; then
+            echo "到达目标时间，准备运行策略！"
+            echo "RUN_SCRIPT=true" >> $GITHUB_ENV
+            
+          # 如果都不是，直接跳过后面的步骤
+          else
+            echo "非目标时间（夏冬令时偏移触发），直接跳过。"
+            echo "RUN_SCRIPT=false" >> $GITHUB_ENV
+          fi
+
+      # 第3步：安装 Python
+      - name: Set up Python
+        if: env.RUN_SCRIPT == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      # 第4步：直接安装你指定的依赖包 (无需 requirements.txt)
+      - name: Install dependencies
+        if: env.RUN_SCRIPT == 'true'
+        run: |
+          pip install yfinance pandas numpy gspread google-auth polygon-api-client lxml
+
+      # 第5步：生成谷歌云服务凭证
+      - name: Create credentials.json
+        if: env.RUN_SCRIPT == 'true'
+        run: |
+          echo '${{ secrets.GCP_SA_JSON }}' > credentials.json
+
+      # 第6步：运行你的 USv777 脚本
+      - name: Run US Screener
+        if: env.RUN_SCRIPT == 'true'
+        run: python run_usv777.py
+
+      # 第7步：安全清理，防止密钥泄漏（即便脚本报错中断也会执行清理）
+      - name: Cleanup credentials
+        if: always() && env.RUN_SCRIPT == 'true'
+        run: rm -f credentials.json
