@@ -1,13 +1,7 @@
 name: US Stocks Screener (Auto DST)
 
 on:
-  schedule:
-    # 涵盖 :06 分的触发点 (对应 15:06 ET 的夏令和冬令 UTC 时间)
-    - cron: '6 19,20 * * 1-5'
-    # 涵盖 :16 分的触发点 (对应 12:16, 16:16 ET 的夏令和冬令 UTC 时间)
-    - cron: '16 16,17,20,21 * * 1-5'
-  workflow_dispatch: 
-    # 允许你在 GitHub 网页端手动点击 "Run workflow" 按钮来测试
+  workflow_dispatch:
 
 jobs:
   run-us-screener:
