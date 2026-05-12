@@ -1,13 +1,7 @@
 name: USv7 Stocks Screener
 
 on:
-  schedule:
-    # 涵盖 15:06 ET 的夏令和冬令 UTC 时间 (UTC 19:06, 20:06)
-    - cron: '6 19,20 * * 1-5'
-    # 涵盖 12:16, 16:16 ET 的夏令和冬令 UTC 时间 (UTC 16:16, 17:16, 20:16, 21:16)
-    - cron: '16 16,17,20,21 * * 1-5'
-  workflow_dispatch: 
-    # 允许网页端手动点击运行测试
+  workflow_dispatch:
 
 jobs:
   run-us-screener:
