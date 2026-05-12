@@ -1,13 +1,6 @@
 name: AV7-Share Screener
 
 on:
-  schedule:
-    # 每天 UTC 04:19 运行 (北京时间 12:19)
-    - cron: '19 4 * * 1-5'
-    # 每天 UTC 06:16 运行 (北京时间 14:16)
-    - cron: '16 6 * * 1-5'
-    # 每天 UTC 07:16 运行 (北京时间 15:16)
-    - cron: '16 7 * * 1-6'
   workflow_dispatch:
 
 # 消除 Node.js 20 老化警告的关键配置！👇
