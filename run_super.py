@@ -20,10 +20,12 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3
 TARGET_SHEET = "super"
 YTD_BASE_DATE = "2025-12-31"
 
+# 💡 實盤同步：更新大神最新 10 檔持倉
+MASTER_CURRENT = ["DUOL", "FSLR", "LLY", "NDAQ", "NTNX", "OKTA", "PWR", "ROKU", "V", "VRT"]
+
 def get_universe():
-    # 💡 深度優化：鎖定大師 5 月輪動的核心標的
-    master_current = ["DUOL", "FSLR", "LLY", "NDAQ", "NTNX", "OKTA", "PWR", "ROKU", "V", "VRT"]
-    core_watchlist = master_current + ["CAVA", "FIVE", "HWM", "MPWR", "LITE", "MU", "SNDK", "GEV", "ALB", "SNPS", "AVGO"]
+    # 加入軟體/雲端/綠能的同儕基因，以捕捉與大神持倉的板塊共振
+    core_watchlist = MASTER_CURRENT + ["CAVA", "FIVE", "HWM", "MPWR", "LITE", "MU", "SNDK", "GEV", "ALB", "SNPS", "AVGO", "CRWD", "PANW", "ENPH"]
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', headers=headers, timeout=15)
@@ -31,16 +33,15 @@ def get_universe():
         return list(set([t.replace('.', '-') for t in sp500] + core_watchlist))
     except: return core_watchlist
 
-# 💡 大師邏輯：放行高品質金融與服務 (Visa, NDAQ)，只攔截重資產銀行與地產
 EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate']
 
 # ==========================================
 # 2. 數據獲取與處理
 # ==========================================
-def fetch_info_v86(t):
+def fetch_info_v87(t):
     ticker = yf.Ticker(t)
     try:
-        time.sleep(random.uniform(0.3, 0.6))
+        time.sleep(random.uniform(0.2, 0.5))
         info = ticker.info
         if info and 'industry' in info:
             info['industry'] = str(info['industry']).strip().replace('\t', '')
@@ -55,7 +56,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V86 深度優化版 同步完成！")
+        print(f"🎉 V87 實盤同步版 同步完成！")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -68,15 +69,14 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V86 (Deep Optimization)
+# 3. 核心量化模型 V87 (Master Sync Optimized)
 # ==========================================
-def run_super_growth_v86():
+def run_super_growth_v87():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
-    master_list = ["DUOL", "FSLR", "LLY", "NDAQ", "NTNX", "OKTA", "PWR", "ROKU", "V", "VRT"]
     
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V86] 啟動 | 深度調整中...")
+    print(f"🚀 [超級成長股 V87] 啟動 | 實盤部位同步與深度優化...")
 
     # 1. 宏觀數據
     try:
@@ -89,7 +89,7 @@ def run_super_growth_v86():
         curr_spy, ma50_spy = float(spy_hist.iloc[-1]), float(spy_hist.tail(50).mean())
         
         weather = "☀️" if curr_spy > ma50_spy and vix_val < 22 else ("☁️" if curr_spy > ma50_spy else "⛈️")
-        strategy = "🛡️ 大師風格: 板塊輪動 & 防禦" if vix_val > 18 else "🚀 積極進攻"
+        strategy = "🛡️ 防禦 & 精準打擊" if vix_val > 18 else "🚀 積極進攻"
         macro_text = f"BNO:${float(m_data['BNO'].iloc[-1]):.1f} | 銅金比:{float(m_data['CPER'].iloc[-1]/m_data['GLD'].iloc[-1]):.3f}"
     except: 
         weather, vix_val, spy_r, strategy, macro_text = "❓", 19.0, {20:0,60:0,120:0}, "數據同步", "掃描中"
@@ -110,10 +110,12 @@ def run_super_growth_v86():
             
             if p > m50: above_50ma += 1
             if p > m20 > m50 > m200: perfect_tickers.append(t)
-            if not (p > m50): continue 
+            
+            # 💡 V87: 放寬大神持倉的均線要求，即使跌破50MA也保留追蹤
+            if not (p > m50) and t not in MASTER_CURRENT: continue 
             
             ema20 = c.ewm(span=20, adjust=False).mean().iloc[-1]
-            risk = ((ema20 - p) / p) * 100
+            risk = ((ema20 - p) / p) * 100 # 負值代表價格在EMA20之上(過熱)
             
             spark_data = ",".join([str(round(v, 2)) for v in c.tail(60).tolist()])
             spark_formula = f'=SPARKLINE({{{spark_data}}}, {{"charttype","line";"linewidth",2;"color","blue"}})'
@@ -131,10 +133,10 @@ def run_super_growth_v86():
             }
         except: continue
 
-    # 3. 獲取基本面 (限制併發)
+    # 3. 獲取基本面
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for t, info in executor.map(fetch_info_v86, list(tech_results.keys())):
+        for t, info in executor.map(fetch_info_v87, list(tech_results.keys())):
             if info: infos[t] = info
 
     ind_res_counts = pd.Series({t: infos.get(t, {}).get('industry', 'Unknown') for t in perfect_tickers}).value_counts().to_dict()
@@ -142,26 +144,34 @@ def run_super_growth_v86():
     # 4. 🥇 深度優化評分 (核心手術)
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_results.items()}).rank(pct=True) * 100).to_dict()
     all_candidates = []
+    
     for t, data in tech_results.items():
         if t not in infos: continue
         info = infos[t]
         sec, ind = str(info.get('sector', 'Unknown')), str(info.get('industry', 'Unknown'))
-        if any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
+        
+        is_master = t in MASTER_CURRENT
+        if not is_master and any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
         
         rs = rs_ranks.get(t, 0)
         risk_val = data['Dist']
         
-        # 💡 深度調整 1：非線性風險懲罰
+        # 💡 V87 評分系統：大幅加強實盤權重
         score = (rs * 0.7) + ((info.get('revenueGrowth', 0) or 0) * 100 * 0.3)
-        if risk_val < -10.0: score *= 0.7  # 距離太遠，分數打七折
-        if risk_val < -15.0: score *= 0.4  # 極度過熱，分數打四折 (直接踢出前排)
+        if risk_val < -10.0: score *= 0.7  
+        if risk_val < -15.0: score *= 0.4  
         
-        # 💡 深度調整 2：大師持倉加權
-        if t in master_list: score += 15 # 優先提拔大師持倉
+        if is_master: score += 30 # 絕對保證大神實盤會浮現在最前排
         
-        if rs < 85: action = "⚠️汰換" # 提高汰換門檻
-        elif -3.0 <= risk_val <= 0.8: action = f"🎯狙擊({round(risk_val,1)}%)"
-        else: action = f"觀察({round(risk_val,1)}%)"
+        # 💡 V87 動態作戰指令 (區分實盤與推薦)
+        if is_master:
+            if risk_val < -10.0: action = f"🛡️持股續抱({round(risk_val,1)}%)"
+            elif -3.0 <= risk_val <= 0.8: action = f"🎯精準加倉({round(risk_val,1)}%)"
+            else: action = f"👀持倉觀察({round(risk_val,1)}%)"
+        else:
+            if rs < 85: action = "⚠️忽略/汰換" 
+            elif -3.0 <= risk_val <= 0.8: action = f"🎯新倉狙擊({round(risk_val,1)}%)"
+            else: action = f"列入觀察({round(risk_val,1)}%)"
 
         msg = f"利潤({round(info.get('operatingMargins', 0)*100, 1)}%)"
         if data['VolRatio'] > 1.3: msg += f"|📈爆量"
@@ -176,28 +186,45 @@ def run_super_growth_v86():
             "VPOC": f"${round(data['H60']*0.95, 1)}(突)" if data['Price'] > data['H60']*0.95 else f"${round(data['H60'], 1)}(壓)"
         })
 
-    # 💡 深度調整 3：跨板塊嚴格分散 (1大3小1)
+    # 💡 深度調整 3：跨板塊嚴格分散 (但大師實盤享有特權！)
     all_candidates.sort(key=lambda x: x['Score'], reverse=True)
     top_final, s_cnt, i_cnt = [], {}, {}
     for r in all_candidates:
-        # 強制大板塊最多 3 隻，行業最多 1 隻
-        if s_cnt.get(r['Sector'], 0) >= 3 or i_cnt.get(r['Industry'], 0) >= 1: continue
+        is_master = r['Ticker'] in MASTER_CURRENT
+        
+        # 實盤標的直接通過！非實盤標的才受板塊數量限制
+        if not is_master:
+            if s_cnt.get(r['Sector'], 0) >= 3 or i_cnt.get(r['Industry'], 0) >= 1: 
+                continue
+                
         top_final.append(r)
         s_cnt[r['Sector']] = s_cnt.get(r['Sector'], 0) + 1
         i_cnt[r['Industry']] = i_cnt.get(r['Industry'], 0) + 1
-        if len(top_final) >= 12: break
+        
+        # 稍微擴充榜單容量至 15 名，容納實盤部位與新鮮血液
+        if len(top_final) >= 15: break
 
     # 5. 精確輸出
     headers = ["排名", "代碼", "板塊", "評分", "作戰指令", "Msg標籤", "今年YTD", "60日趨勢(圖)", "REL20", "REL60", "REL120", "RS_Rank", "行業共振", "ADR", "量比", "價格", "1D%", "MktCap", "籌碼峰", "Score", "盤建", "更新時間"]
     us_breadth = (above_50ma / len(universe) * 100) if universe else 0
     m_info = f"{weather} | 寬度:{us_breadth:.1f}% | 共振:{len(perfect_tickers)}隻 | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
     
-    matrix = [[f"Master Sniper V86 (Deep Optimized)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    matrix = [[f"Master Sniper V87 (IB Sync Optimized)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    
     for i, r in enumerate(top_final):
-        t_disp = f"👑 {r['Ticker']}" if i < 3 else r['Ticker']
-        matrix.append([f"T{i+1}", t_disp, r['Industry'][:16], f"{round(r['Rate'], 1)} ", r['Action'], r['Msg'], f_pct(r['YTD']), r['Trend'], f_pct(r['REL20']), f_pct(r['REL60']), f_pct(r['REL120']), f"{round(r['RS'], 1)} ", r['Res'], f"{round(r['ADR'], 2)}%", f"{round(r['Vol'], 2)}x", f_price(r['Price']), f_1d(r['1D']), f"{round(r['MCap'], 1)} ", r['VPOC'], f"{round(r['Score'], 1)} ", "✅ 持有", update_time])
+        # 💡 V87 UI視覺強化
+        t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
+        pos_status = "👑 大神持倉" if r['Ticker'] in MASTER_CURRENT else "✅ 建議關注"
+        
+        matrix.append([
+            f"T{i+1}", t_disp, r['Industry'][:16], f"{round(r['Rate'], 1)} ", r['Action'], r['Msg'], 
+            f_pct(r['YTD']), r['Trend'], f_pct(r['REL20']), f_pct(r['REL60']), f_pct(r['REL120']), 
+            f"{round(r['RS'], 1)} ", r['Res'], f"{round(r['ADR'], 2)}%", f"{round(r['Vol'], 2)}x", 
+            f_price(r['Price']), f_1d(r['1D']), f"{round(r['MCap'], 1)} ", r['VPOC'], 
+            f"{round(r['Score'], 1)} ", pos_status, update_time
+        ])
 
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_super_growth_v86() # 💡 已正確指向 V86
+    run_super_growth_v87()
