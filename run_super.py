@@ -31,7 +31,7 @@ def get_universe():
         return list(set([t.replace('.', '-') for t in sp500] + core))
     except: return core
 
-# 💡 禁忌解除：移除了 'Financial' 和 'Credit'，允許 V 和 NDAQ 入選，但繼續攔截純銀行保險
+# 💡 禁忌解除：允許 V 和 NDAQ 入選，攔截純銀行保險
 EXCLUDED = ['Banks', 'Insurance', 'REIT', 'Utilities', 'Oil & Gas']
 
 # ==========================================
@@ -55,7 +55,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V82 同步成功！大師級調倉邏輯已上線。")
+        print(f"🎉 V82.1 同步成功！大師級調倉邏輯已完美上線。")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -68,13 +68,13 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V82
+# 3. 核心量化模型 V82.1
 # ==========================================
 def run_super_growth_v82():
     update_time = datetime.datetime.now().strftime('%m-%d %H:%M:%S')
     universe = get_universe()
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V82] 啟動 | 正在載入軟體板塊與防禦巨頭...")
+    print(f"🚀 [超級成長股 V82.1] 啟動 | 正在載入軟體板塊與防禦巨頭...")
 
     # 1. 宏觀與天氣
     try:
@@ -153,7 +153,6 @@ def run_super_growth_v82():
         info = infos[t]
         sec, ind = str(info.get('sector', 'Unknown')), str(info.get('industry', 'Unknown'))
         
-        # 這裡會正確放行 V(Visa) 和 NDAQ
         if any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
         if any(ex.lower() in sec.lower() for ex in EXCLUDED): continue
         
@@ -190,7 +189,7 @@ def run_super_growth_v82():
         top_10.append(r)
         s_cnt[r['Sec']] = s_cnt.get(r['Sec'], 0) + 1
         i_cnt[r['Ind']] = i_cnt.get(r['Ind'], 0) + 1
-        if len(top_10) >= 12: break # 增加顯示數量到12隻，方便查看新入選標的
+        if len(top_10) >= 12: break
 
     # ==========================================
     # 5. 精確對齊輸出
@@ -200,14 +199,15 @@ def run_super_growth_v82():
     us_breadth = (above_50ma / total_valid * 100) if total_valid > 0 else 0
     m_info = f"天氣:{weather} | 寬度:{us_breadth:.1f}% | 共振:{len(perfect_tickers)}隻 | VIX:{round(vix_val, 1)} | 戰略:{strategy} | {macro_text}"
     
-    row1 = [f"Master Sniper V82 (Rotation Update)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3)
+    row1 = [f"Master Sniper V82.1 (Rotation Fixed)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3)
     
     matrix = [row1, headers]
     for i, r in enumerate(top_10):
+        # 💡 已修復：全部改用 f_pct 函數，完美對齊
         matrix.append([
             f"T{i+1}", r['T'], r['Ind'], f"{round(r['Rate'], 1)} ", r['Action'], r['Msg'],
-            f_p(r['YTD']), r['Trend'], f_p(r['REL20']), f_p(r['REL60']), f_p(r['REL120']),
-            f"{round(r['RS'], 1)} ", r['Res'], f"{round(r['ADR'], 2)}%", f"{round(r['Vol'], 2)}x",
+            f_pct(r['YTD']), r['Trend'], f_pct(r['REL20']), f_pct(r['REL60']), f_pct(r['REL120']),
+            f"{round(r['RS'], 1)} ", r['Res'], f_pct(r['ADR']/100), f"{round(r['Vol'], 2)}x",
             f_price(r['P']), f_1d(r['1D']), f"{round(r['MCap'], 1)} ", r['VP'], f"{round(r['Score'], 1)} ", update_time
         ])
 
