@@ -37,10 +37,10 @@ EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate
 # ==========================================
 # 2. 數據獲取與處理
 # ==========================================
-def fetch_info_v88(t):
+def fetch_info_v89(t):
     ticker = yf.Ticker(t)
     try:
-        time.sleep(random.uniform(0.2, 0.5))
+        time.sleep(random.uniform(0.1, 0.4))
         info = ticker.info
         if info and 'industry' in info:
             info['industry'] = str(info['industry']).strip().replace('\t', '')
@@ -55,7 +55,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V88 實盤霸榜版 同步完成！所有持倉已置頂。")
+        print(f"🎉 V89 霸榜與配額修復版 同步完成！")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -63,25 +63,24 @@ def get_ret(series, days):
     return (series.iloc[-1] / series.iloc[-(days+1)]) - 1
 
 def f_pct(v): return f"{round(v*100, 2)}%" if not pd.isna(v) else "0.00%"
-def f_num(v): return f"{round(v, 1)}" if not pd.isna(v) else "0.0"
 def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V88 (Absolute Hegemony)
+# 3. 核心量化模型 V89 (Macro Fixed & Quota Separated)
 # ==========================================
-def run_super_growth_v88():
+def run_super_growth_v89():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V88] 啟動 | 實盤強制霸榜模式...")
+    print(f"🚀 [超級成長股 V89] 啟動 | 宏觀修復 & 獨立配額保護...")
 
-    # 1. 宏觀數據
+    # 1. 宏觀數據 (💡 V89: 修復了 dropna() 誤殺導致數據消失的 Bug)
     try:
-        m_data = yf.download(["SPY", "^VIX", "BNO", "GLD", "CPER"], period="2y", progress=False)['Close'].dropna()
-        spy_hist = m_data['SPY']
-        vix_val = float(m_data['^VIX'].iloc[-1])
+        m_data = yf.download(["SPY", "^VIX", "BNO", "GLD", "CPER"], period="2y", progress=False)['Close']
+        spy_hist = m_data['SPY'].dropna()
+        vix_val = float(m_data['^VIX'].dropna().iloc[-1])
         if vix_val < 0.1: vix_val = float(yf.Ticker("^VIX").history(period="5d")['Close'].iloc[-1])
         
         spy_r = {20: get_ret(spy_hist, 20), 60: get_ret(spy_hist, 60), 120: get_ret(spy_hist, 120)}
@@ -89,8 +88,13 @@ def run_super_growth_v88():
         
         weather = "☀️" if curr_spy > ma50_spy and vix_val < 22 else ("☁️" if curr_spy > ma50_spy else "⛈️")
         strategy = "🛡️ 護盤 & 精準打擊" if vix_val > 18 else "🚀 積極進攻"
-        macro_text = f"BNO:${float(m_data['BNO'].iloc[-1]):.1f} | 銅金比:{float(m_data['CPER'].iloc[-1]/m_data['GLD'].iloc[-1]):.3f}"
-    except: 
+        
+        bno_val = float(m_data['BNO'].dropna().iloc[-1])
+        cper_val = float(m_data['CPER'].dropna().iloc[-1])
+        gld_val = float(m_data['GLD'].dropna().iloc[-1])
+        macro_text = f"BNO:${bno_val:.1f} | 銅金比:{cper_val/gld_val:.3f}"
+    except Exception as e: 
+        print(f"⚠️ 宏觀數據獲取異常: {e}")
         weather, vix_val, spy_r, strategy, macro_text = "❓", 19.0, {20:0,60:0,120:0}, "數據同步", "掃描中"
 
     # 2. 技術面深度掃描
@@ -102,7 +106,6 @@ def run_super_growth_v88():
         try:
             if t not in close_df.columns: continue
             c = close_df[t].dropna()
-            # 💡 V88: 稍微放寬 K 線數量限制，確保 DUOL 等較新股票不會被誤殺
             if len(c) < 150: continue 
             
             p = float(c.iloc[-1])
@@ -111,7 +114,6 @@ def run_super_growth_v88():
             if p > m50: above_50ma += 1
             if p > m20 > m50 > m200: perfect_tickers.append(t)
             
-            # 實盤股票無視 50MA 跌破限制
             if not (p > m50) and t not in MASTER_CURRENT: continue 
             
             ema20 = c.ewm(span=20, adjust=False).mean().iloc[-1]
@@ -135,12 +137,12 @@ def run_super_growth_v88():
     # 3. 獲取基本面
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for t, info in executor.map(fetch_info_v88, list(tech_results.keys())):
+        for t, info in executor.map(fetch_info_v89, list(tech_results.keys())):
             if info: infos[t] = info
 
     ind_res_counts = pd.Series({t: infos.get(t, {}).get('industry', 'Unknown') for t in perfect_tickers}).value_counts().to_dict()
 
-    # 4. 🥇 V88 極致評分系統
+    # 4. 🥇 V89 評分系統
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_results.items()}).rank(pct=True) * 100).to_dict()
     all_candidates = []
     
@@ -155,26 +157,27 @@ def run_super_growth_v88():
         rs = rs_ranks.get(t, 0)
         risk_val = data['Dist']
         
-        # 基礎算分
         score = (rs * 0.7) + ((info.get('revenueGrowth', 0) or 0) * 100 * 0.3)
         if risk_val < -10.0: score *= 0.7  
         if risk_val < -15.0: score *= 0.4  
         
-        # 💡 V88 霸榜特權：實盤部位強制加 10000 分！
         if is_master: score += 10000 
         
-        # 💡 UI 精簡化：防止 Google Sheet 截斷
+        # 💡 V89 UI 極致瘦身：去掉小數點，防止被擠壓截斷
+        risk_fmt = f"{int(risk_val)}%"
         if is_master:
-            if risk_val < -10.0: action = f"🛡️續抱({round(risk_val,1)}%)"
-            elif -3.0 <= risk_val <= 0.8: action = f"🎯加倉({round(risk_val,1)}%)"
-            else: action = f"👀觀察({round(risk_val,1)}%)"
+            if risk_val < -10.0: action = f"🛡️續抱({risk_fmt})"
+            elif -3.0 <= risk_val <= 0.8: action = f"🎯加倉({risk_fmt})"
+            else: action = f"👀觀察({risk_fmt})"
         else:
-            if rs < 85: action = "⚠️汰換" 
-            elif -3.0 <= risk_val <= 0.8: action = f"🎯狙擊({round(risk_val,1)}%)"
-            else: action = f"列入({round(risk_val,1)}%)"
+            if rs < 85: action = f"⚠️汰換" 
+            elif -3.0 <= risk_val <= 0.8: action = f"🎯狙擊({risk_fmt})"
+            else: action = f"🔍列入({risk_fmt})"
 
-        msg = f"利潤({round(info.get('operatingMargins', 0)*100, 1)}%)"
-        if data['VolRatio'] > 1.3: msg += f"|📈爆量"
+        # 💡 V89 UI 極致瘦身：縮減冗長字詞
+        op_margin = int(info.get('operatingMargins', 0) * 100) if info.get('operatingMargins') else 0
+        msg = f"利{op_margin}%"
+        if data['VolRatio'] > 1.3: msg += f"|爆量"
         if data['Tight'] < 3.2: msg += f"|收斂"
 
         all_candidates.append({
@@ -186,23 +189,21 @@ def run_super_growth_v88():
             "VPOC": f"${round(data['H60']*0.95, 1)}(突)" if data['Price'] > data['H60']*0.95 else f"${round(data['H60'], 1)}(壓)"
         })
 
-    # 排序：因為實盤有 +10000 分，一定會排在最前面
     all_candidates.sort(key=lambda x: x['Score'], reverse=True)
     
     top_final, s_cnt, i_cnt = [], {}, {}
     for r in all_candidates:
         is_master = r['Ticker'] in MASTER_CURRENT
         
-        # 非實盤才受板塊數量限制
+        # 💡 V89 致命修正：實盤部位不消耗行業配額！
+        # 這樣就不會排擠掉底下最強的 MU 和 SNDK
         if not is_master:
             if s_cnt.get(r['Sector'], 0) >= 3 or i_cnt.get(r['Industry'], 0) >= 1: 
                 continue
-                
+            s_cnt[r['Sector']] = s_cnt.get(r['Sector'], 0) + 1
+            i_cnt[r['Industry']] = i_cnt.get(r['Industry'], 0) + 1
+            
         top_final.append(r)
-        s_cnt[r['Sector']] = s_cnt.get(r['Sector'], 0) + 1
-        i_cnt[r['Industry']] = i_cnt.get(r['Industry'], 0) + 1
-        
-        # 💡 V88：擴展為 20 檔，確保 10檔實盤 + 10檔潛力股 都能顯示
         if len(top_final) >= 20: break
 
     # 5. 精確輸出
@@ -210,14 +211,14 @@ def run_super_growth_v88():
     us_breadth = (above_50ma / len(universe) * 100) if universe else 0
     m_info = f"{weather} | 寬度:{us_breadth:.1f}% | 共振:{len(perfect_tickers)}隻 | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
     
-    matrix = [[f"Master Sniper V88 (Absolute Hegemony)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    matrix = [[f"Master Sniper V89 (Macro Fixed & Quota Separated)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
     
     for i, r in enumerate(top_final):
-        # 💡 UI 再進化：字眼縮短，防止表格變形
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
-        pos_status = "👑實盤" if r['Ticker'] in MASTER_CURRENT else "✅關注"
         
-        # 為了美觀，將破萬的 Score 減去 10000 顯示原本的真實強度分數
+        # 💡 V89 UI：盤建欄位濃縮為一個 Emoji，完美適應窄欄位
+        pos_status = "👑" if r['Ticker'] in MASTER_CURRENT else "✅"
+        
         display_score = r['Score'] - 10000 if r['Ticker'] in MASTER_CURRENT else r['Score']
         
         matrix.append([
@@ -231,4 +232,4 @@ def run_super_growth_v88():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_super_growth_v88()
+    run_super_growth_v89()
