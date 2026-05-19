@@ -20,7 +20,6 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3
 TARGET_SHEET = "super"
 YTD_BASE_DATE = "2025-12-31"
 
-# 💡 實盤同步：更新大神最新 10 檔持倉
 MASTER_CURRENT = ["DUOL", "FSLR", "LLY", "NDAQ", "NTNX", "OKTA", "PWR", "ROKU", "V", "VRT"]
 
 def get_universe():
@@ -37,7 +36,7 @@ EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate
 # ==========================================
 # 2. 數據獲取與處理
 # ==========================================
-def fetch_info_v89(t):
+def fetch_info_v90(t):
     ticker = yf.Ticker(t)
     try:
         time.sleep(random.uniform(0.1, 0.4))
@@ -55,7 +54,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V89 霸榜與配額修復版 同步完成！")
+        print(f"🎉 V90 終極打磨版 同步完成！準備迎接完美版面。")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -67,16 +66,16 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V89 (Macro Fixed & Quota Separated)
+# 3. 核心量化模型 V90 (Ultimate Polish)
 # ==========================================
-def run_super_growth_v89():
+def run_super_growth_v90():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V89] 啟動 | 宏觀修復 & 獨立配額保護...")
+    print(f"🚀 [超級成長股 V90] 啟動 | 最終 UI 極致壓縮...")
 
-    # 1. 宏觀數據 (💡 V89: 修復了 dropna() 誤殺導致數據消失的 Bug)
+    # 1. 宏觀數據
     try:
         m_data = yf.download(["SPY", "^VIX", "BNO", "GLD", "CPER"], period="2y", progress=False)['Close']
         spy_hist = m_data['SPY'].dropna()
@@ -137,12 +136,12 @@ def run_super_growth_v89():
     # 3. 獲取基本面
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for t, info in executor.map(fetch_info_v89, list(tech_results.keys())):
+        for t, info in executor.map(fetch_info_v90, list(tech_results.keys())):
             if info: infos[t] = info
 
     ind_res_counts = pd.Series({t: infos.get(t, {}).get('industry', 'Unknown') for t in perfect_tickers}).value_counts().to_dict()
 
-    # 4. 🥇 V89 評分系統
+    # 4. 🥇 V90 評分系統與 UI 極致微調
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_results.items()}).rank(pct=True) * 100).to_dict()
     all_candidates = []
     
@@ -163,22 +162,25 @@ def run_super_growth_v89():
         
         if is_master: score += 10000 
         
-        # 💡 V89 UI 極致瘦身：去掉小數點，防止被擠壓截斷
-        risk_fmt = f"{int(risk_val)}%"
+        # 💡 V90 UI：徹底消除 -0% 的問題，並使用極簡單字
+        risk_int = int(round(risk_val))
+        if risk_int == 0: risk_int = 0 
+        risk_fmt = f"{risk_int}%"
+        
         if is_master:
-            if risk_val < -10.0: action = f"🛡️續抱({risk_fmt})"
-            elif -3.0 <= risk_val <= 0.8: action = f"🎯加倉({risk_fmt})"
-            else: action = f"👀觀察({risk_fmt})"
+            if risk_val < -10.0: action = f"🛡️抱({risk_fmt})"
+            elif -3.0 <= risk_val <= 0.8: action = f"🎯加({risk_fmt})"
+            else: action = f"👀觀({risk_fmt})"
         else:
-            if rs < 85: action = f"⚠️汰換" 
-            elif -3.0 <= risk_val <= 0.8: action = f"🎯狙擊({risk_fmt})"
-            else: action = f"🔍列入({risk_fmt})"
+            if rs < 85: action = f"⚠️汰({risk_fmt})" 
+            elif -3.0 <= risk_val <= 0.8: action = f"🎯狙({risk_fmt})"
+            else: action = f"🔍列({risk_fmt})"
 
-        # 💡 V89 UI 極致瘦身：縮減冗長字詞
+        # 💡 V90 UI：極致壓縮 Msg 標籤，不留廢字
         op_margin = int(info.get('operatingMargins', 0) * 100) if info.get('operatingMargins') else 0
-        msg = f"利{op_margin}%"
-        if data['VolRatio'] > 1.3: msg += f"|爆量"
-        if data['Tight'] < 3.2: msg += f"|收斂"
+        msg = f"利{op_margin}"
+        if data['VolRatio'] > 1.3: msg += f"|爆"
+        if data['Tight'] < 3.2: msg += f"|收"
 
         all_candidates.append({
             "Ticker": t, "Sector": sec, "Industry": ind, "Score": score, "Action": action, "Msg": msg,
@@ -195,8 +197,6 @@ def run_super_growth_v89():
     for r in all_candidates:
         is_master = r['Ticker'] in MASTER_CURRENT
         
-        # 💡 V89 致命修正：實盤部位不消耗行業配額！
-        # 這樣就不會排擠掉底下最強的 MU 和 SNDK
         if not is_master:
             if s_cnt.get(r['Sector'], 0) >= 3 or i_cnt.get(r['Industry'], 0) >= 1: 
                 continue
@@ -211,18 +211,17 @@ def run_super_growth_v89():
     us_breadth = (above_50ma / len(universe) * 100) if universe else 0
     m_info = f"{weather} | 寬度:{us_breadth:.1f}% | 共振:{len(perfect_tickers)}隻 | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
     
-    matrix = [[f"Master Sniper V89 (Macro Fixed & Quota Separated)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    matrix = [[f"Master Sniper V90 (Ultimate Dashboard)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
     
     for i, r in enumerate(top_final):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
-        
-        # 💡 V89 UI：盤建欄位濃縮為一個 Emoji，完美適應窄欄位
         pos_status = "👑" if r['Ticker'] in MASTER_CURRENT else "✅"
         
         display_score = r['Score'] - 10000 if r['Ticker'] in MASTER_CURRENT else r['Score']
         
+        # 💡 V90：將板塊名稱限制在 14 個字元以內，防止溢出
         matrix.append([
-            f"T{i+1}", t_disp, r['Industry'][:16], f"{round(r['Rate'], 1)} ", r['Action'], r['Msg'], 
+            f"T{i+1}", t_disp, r['Industry'][:14], f"{round(r['Rate'], 1)} ", r['Action'], r['Msg'], 
             f_pct(r['YTD']), r['Trend'], f_pct(r['REL20']), f_pct(r['REL60']), f_pct(r['REL120']), 
             f"{round(r['RS'], 1)} ", r['Res'], f"{round(r['ADR'], 2)}%", f"{round(r['Vol'], 2)}x", 
             f_price(r['Price']), f_1d(r['1D']), f"{round(r['MCap'], 1)} ", r['VPOC'], 
@@ -232,4 +231,4 @@ def run_super_growth_v89():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_super_growth_v89()
+    run_super_growth_v90()
