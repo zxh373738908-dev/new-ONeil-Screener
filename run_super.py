@@ -20,10 +20,12 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3
 TARGET_SHEET = "super"
 YTD_BASE_DATE = "2025-12-31"
 
-MASTER_CURRENT = ["DUOL", "FSLR", "LLY", "NDAQ", "NTNX", "OKTA", "PWR", "ROKU", "V", "VRT"]
+# 💡 V91 更新：剔除 DUOL，新增 TWLO
+MASTER_CURRENT = ["FSLR", "LLY", "NDAQ", "NTNX", "OKTA", "PWR", "ROKU", "TWLO", "V", "VRT"]
 
 def get_universe():
-    core_watchlist = MASTER_CURRENT + ["CAVA", "FIVE", "HWM", "MPWR", "LITE", "MU", "SNDK", "GEV", "ALB", "SNPS", "AVGO", "CRWD", "PANW", "ENPH"]
+    # 將退場的 DUOL 放回備選池，持續監控其日後動量
+    core_watchlist = MASTER_CURRENT + ["DUOL", "CAVA", "FIVE", "HWM", "MPWR", "LITE", "MU", "SNDK", "GEV", "ALB", "SNPS", "AVGO", "CRWD", "PANW", "ENPH"]
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', headers=headers, timeout=15)
@@ -36,7 +38,7 @@ EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate
 # ==========================================
 # 2. 數據獲取與處理
 # ==========================================
-def fetch_info_v90(t):
+def fetch_info_v91(t):
     ticker = yf.Ticker(t)
     try:
         time.sleep(random.uniform(0.1, 0.4))
@@ -54,7 +56,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V90 終極打磨版 同步完成！準備迎接完美版面。")
+        print(f"🎉 V91 動態調倉版 同步完成！TWLO 已成功入列。")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -66,14 +68,14 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V90 (Ultimate Polish)
+# 3. 核心量化模型 V91 (Dynamic Rebalance)
 # ==========================================
-def run_super_growth_v90():
+def run_super_growth_v91():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V90] 啟動 | 最終 UI 極致壓縮...")
+    print(f"🚀 [超級成長股 V91] 啟動 | 實盤部位更新: TWLO 進, DUOL 出...")
 
     # 1. 宏觀數據
     try:
@@ -86,7 +88,7 @@ def run_super_growth_v90():
         curr_spy, ma50_spy = float(spy_hist.iloc[-1]), float(spy_hist.tail(50).mean())
         
         weather = "☀️" if curr_spy > ma50_spy and vix_val < 22 else ("☁️" if curr_spy > ma50_spy else "⛈️")
-        strategy = "🛡️ 護盤 & 精準打擊" if vix_val > 18 else "🚀 積極進攻"
+        strategy = "🛡️ 順勢而為 & 汰弱留強" if vix_val > 18 else "🚀 積極進攻"
         
         bno_val = float(m_data['BNO'].dropna().iloc[-1])
         cper_val = float(m_data['CPER'].dropna().iloc[-1])
@@ -136,12 +138,12 @@ def run_super_growth_v90():
     # 3. 獲取基本面
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for t, info in executor.map(fetch_info_v90, list(tech_results.keys())):
+        for t, info in executor.map(fetch_info_v91, list(tech_results.keys())):
             if info: infos[t] = info
 
     ind_res_counts = pd.Series({t: infos.get(t, {}).get('industry', 'Unknown') for t in perfect_tickers}).value_counts().to_dict()
 
-    # 4. 🥇 V90 評分系統與 UI 極致微調
+    # 4. 🥇 V91 評分系統與極致 UI
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_results.items()}).rank(pct=True) * 100).to_dict()
     all_candidates = []
     
@@ -162,21 +164,20 @@ def run_super_growth_v90():
         
         if is_master: score += 10000 
         
-        # 💡 V90 UI：徹底消除 -0% 的問題，並使用極簡單字
         risk_int = int(round(risk_val))
         if risk_int == 0: risk_int = 0 
         risk_fmt = f"{risk_int}%"
         
+        # 💡 如果 TWLO 剛好回踩 20MA，這裡的 risk_fmt 應該會非常接近 0% 到 -3%，系統會精準給出 🎯加/狙 指令！
         if is_master:
             if risk_val < -10.0: action = f"🛡️抱({risk_fmt})"
-            elif -3.0 <= risk_val <= 0.8: action = f"🎯加({risk_fmt})"
+            elif -3.0 <= risk_val <= 1.0: action = f"🎯加({risk_fmt})"
             else: action = f"👀觀({risk_fmt})"
         else:
             if rs < 85: action = f"⚠️汰({risk_fmt})" 
-            elif -3.0 <= risk_val <= 0.8: action = f"🎯狙({risk_fmt})"
+            elif -3.0 <= risk_val <= 1.0: action = f"🎯狙({risk_fmt})"
             else: action = f"🔍列({risk_fmt})"
 
-        # 💡 V90 UI：極致壓縮 Msg 標籤，不留廢字
         op_margin = int(info.get('operatingMargins', 0) * 100) if info.get('operatingMargins') else 0
         msg = f"利{op_margin}"
         if data['VolRatio'] > 1.3: msg += f"|爆"
@@ -211,7 +212,7 @@ def run_super_growth_v90():
     us_breadth = (above_50ma / len(universe) * 100) if universe else 0
     m_info = f"{weather} | 寬度:{us_breadth:.1f}% | 共振:{len(perfect_tickers)}隻 | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
     
-    matrix = [[f"Master Sniper V90 (Ultimate Dashboard)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    matrix = [[f"Master Sniper V91 (Dynamic Rebalance)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
     
     for i, r in enumerate(top_final):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
@@ -219,7 +220,6 @@ def run_super_growth_v90():
         
         display_score = r['Score'] - 10000 if r['Ticker'] in MASTER_CURRENT else r['Score']
         
-        # 💡 V90：將板塊名稱限制在 14 個字元以內，防止溢出
         matrix.append([
             f"T{i+1}", t_disp, r['Industry'][:14], f"{round(r['Rate'], 1)} ", r['Action'], r['Msg'], 
             f_pct(r['YTD']), r['Trend'], f_pct(r['REL20']), f_pct(r['REL60']), f_pct(r['REL120']), 
@@ -231,4 +231,4 @@ def run_super_growth_v90():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_super_growth_v90()
+    run_super_growth_v91()
