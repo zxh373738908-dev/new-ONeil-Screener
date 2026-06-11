@@ -20,12 +20,12 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3
 TARGET_SHEET = "super"
 YTD_BASE_DATE = "2025-12-31"
 
-# 💡 V93 股票名單不變 (陣地戰佈局完成)
-MASTER_CURRENT = ["ADM", "DAL", "FSLR", "IBKR", "LLY", "MNST", "PWR", "QS", "ROKU", "VRT"]
+# 💡 V94 最新持倉：執行停損利了結，重兵佈局旅遊與特種工業，並抄底 MU
+MASTER_CURRENT = ["ATI", "DAL", "IBKR", "IRDM", "LLY", "MNST", "MU", "PWR", "QS", "VIK"]
 
 def get_universe():
-    # 保持追蹤前朝遺珠與市場強勢股
-    core_watchlist = MASTER_CURRENT + ["NDAQ", "NTNX", "OKTA", "TWLO", "V", "DUOL", "CAVA", "FIVE", "HWM", "MPWR", "LITE", "MU", "SNDK", "GEV", "ALB", "SNPS", "AVGO", "CRWD"]
+    # 將賣出的 VRT, FSLR, ROKU, ADM 放入監控池，持續觀察洗盤後的二度機會
+    core_watchlist = MASTER_CURRENT + ["VRT", "FSLR", "ROKU", "ADM", "NDAQ", "NTNX", "OKTA", "TWLO", "V", "DUOL", "SNDK", "TER", "NUE"]
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', headers=headers, timeout=15)
@@ -38,7 +38,7 @@ EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate
 # ==========================================
 # 2. 數據獲取與處理
 # ==========================================
-def fetch_info_v93(t):
+def fetch_info_v94(t):
     ticker = yf.Ticker(t)
     try:
         time.sleep(random.uniform(0.1, 0.3))
@@ -56,7 +56,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V93 宏觀對沖版 同步完成！已掛載做空警戒。")
+        print(f"🎉 V94 震盪洗盤與火力重整版 同步完成！最新 10 大陣容已上線。")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -68,16 +68,16 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V93 (Macro Hedging & Alpha Seeking)
+# 3. 核心量化模型 V94 (Post-Shakeout Deployment)
 # ==========================================
-def run_super_growth_v93():
+def run_super_growth_v94():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V93] 啟動 | 偵測到大師啟動做空對沖機制...")
+    print(f"🚀 [超級成長股 V94] 啟動 | 偵測到停利出場與逢低建倉動作...")
 
-    # 1. 宏觀數據 (💡 V93: 植入強烈對沖警戒信號)
+    # 1. 宏觀數據
     try:
         m_data = yf.download(["SPY", "^VIX", "BNO", "GLD", "CPER"], period="2y", progress=False)['Close']
         spy_hist = m_data['SPY'].dropna()
@@ -87,8 +87,8 @@ def run_super_growth_v93():
         spy_r = {20: get_ret(spy_hist, 20), 60: get_ret(spy_hist, 60), 120: get_ret(spy_hist, 120)}
         curr_spy, ma50_spy = float(spy_hist.iloc[-1]), float(spy_hist.tail(50).mean())
         
-        weather = "⛈️ 宏觀風險極高" 
-        strategy = "🛡️ Alpha 對沖模式 (大盤做空保護中)"
+        weather = "☀️ 震盪企穩" if curr_spy > ma50_spy and vix_val < 22 else ("⛈️ 餘震不斷" if curr_spy > ma50_spy else "📉 跌破趨勢")
+        strategy = "🛡️ 紀律停損 & 逢低狙擊" if vix_val > 18 else "🚀 積極進攻"
         
         bno_val = float(m_data['BNO'].dropna().iloc[-1])
         cper_val = float(m_data['CPER'].dropna().iloc[-1])
@@ -138,12 +138,12 @@ def run_super_growth_v93():
     # 3. 獲取基本面
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for t, info in executor.map(fetch_info_v93, list(tech_results.keys())):
+        for t, info in executor.map(fetch_info_v94, list(tech_results.keys())):
             if info: infos[t] = info
 
     ind_res_counts = pd.Series({t: infos.get(t, {}).get('industry', 'Unknown') for t in perfect_tickers}).value_counts().to_dict()
 
-    # 4. 🥇 V93 評分系統
+    # 4. 🥇 V94 評分系統與動態指令
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_results.items()}).rank(pct=True) * 100).to_dict()
     all_candidates = []
     
@@ -210,10 +210,9 @@ def run_super_growth_v93():
     headers = ["排名", "代碼", "板塊", "評分", "作戰指令", "Msg標籤", "今年YTD", "60日趨勢(圖)", "REL20", "REL60", "REL120", "RS_Rank", "行業共振", "ADR", "量比", "價格", "1D%", "MktCap", "籌碼峰", "Score", "盤建", "更新時間"]
     us_breadth = (above_50ma / len(universe) * 100) if universe else 0
     
-    # 💡 V93: 儀表板頂部掛載極限防禦通告
-    m_info = f"{weather} | ⚠️ 系統偵測到大師做空標普(MES)護盤 | 寬度:{us_breadth:.1f}% | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
+    m_info = f"{weather} | 洗盤後火力重整 | 寬度:{us_breadth:.1f}% | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
     
-    matrix = [[f"Master Sniper V93 (Macro Hedging & Alpha Seeking)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    matrix = [[f"Master Sniper V94 (Post-Shakeout Deployment)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
     
     for i, r in enumerate(top_final):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
@@ -232,4 +231,4 @@ def run_super_growth_v93():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_super_growth_v93()
+    run_super_growth_v94()
