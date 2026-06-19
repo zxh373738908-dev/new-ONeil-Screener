@@ -17,6 +17,7 @@ warnings.filterwarnings('ignore')
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3VN9a0Ilf9amoy1EtQV_GBXJkk_A4PpsrJxKzH7i51/exec"
 TARGET_SHEET = "A_Super" 
 PORTFOLIO_CAPITAL = 1000000  
+TARGET_POSITIONS = 10  # 🎯 修復：補上限制 10 檔持倉的參數
 
 # 🚀 V130 大神同步股票池：加入能源，剔除彩票
 GURU_LIST_A =[
