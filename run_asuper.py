@@ -12,33 +12,27 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 系統配置中心 (V130 能源輪動與狙擊手版)
+# 1. 系統配置中心 (V140 無我輪動與困境反轉版)
 # ==========================================
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3VN9a0Ilf9amoy1EtQV_GBXJkk_A4PpsrJxKzH7i51/exec"
 TARGET_SHEET = "A_Super" 
 PORTFOLIO_CAPITAL = 1000000  
-TARGET_POSITIONS = 10  # 🎯 修復：補上限制 10 檔持倉的參數
+TARGET_POSITIONS = 10  
 
-# 🚀 V130 大神同步股票池：加入能源，剔除彩票
+# 🚀 V140 股票池大換血：加入跌深反彈平台/傳媒股 (ROKU對標)
 GURU_LIST_A =[
-    # 🛢️ 新增：傳統能源/高股息/油氣基建 (對標 TRGP)
-    "600938.SS", # 中國海油
-    "601088.SS", # 中國神華
-    "600256.SS", # 廣匯能源
-    "601872.SS", # 招商輪船 (能源運輸)
+    # 🔄 ROKU 對標：平台經濟/傳媒互聯網/困境反轉
+    "300413.SZ", # 芒果超媒 (串流/內容平台)
+    "002027.SZ", # 分眾傳媒 (廣告平台復甦)
+    "300059.SZ", # 東方財富 (互聯網券商跌深反彈)
+    "600588.SS", # 用友網絡 (SaaS超跌反彈)
     
-    # 存儲/半導體 (對標 MU)
-    "603986.SS", "301308.SZ", "688525.SS", 
-    # 低軌衛星/通訊 (對標 IRDM)
-    "601698.SS", "001270.SZ", "688292.SS", 
-    # 特種金屬/軍工材料 (對標 ATI)
-    "600893.SS", "600862.SS", "688122.SS", 
-    # 航空/免稅/高端消費 (對標 DAL, VIK, MNST)
-    "601888.SS", "601111.SS", "605499.SS",
-    # 券商/高息金融 (對標 IBKR)
-    "600030.SS", "300059.SZ",
-    # 絕對核心老將 (對標 PWR, LLY)
-    "300308.SZ", "600487.SS", "603259.SS", "600276.SS"
+    # MU / 半導體週期
+    "301308.SZ", "688525.SS", "603986.SS",
+    # 傳統防禦/剛需/高股息
+    "600938.SS", "601088.SS", "603259.SS", "600276.SS",
+    # 科技與基礎設施老將 (PWR對標)
+    "300308.SZ", "600487.SS", "300408.SZ", "601138.SS"
 ]
 
 def get_universe_a(): return list(set(GURU_LIST_A))
@@ -52,8 +46,7 @@ def fetch_info_a(t):
             if info and 'industry' in info:
                 return t, {
                     'sector': str(info.get('sector', 'Unknown')),
-                    'returnOnEquity': info.get('returnOnEquity', 0),
-                    'dividendYield': info.get('dividendYield', 0) # V130: 引入股息率評估能源股
+                    'returnOnEquity': info.get('returnOnEquity', 0)
                 }
         except: time.sleep(0.3)
     return t, {}
@@ -64,13 +57,13 @@ def get_ret(series, days):
     return (float(series.iloc[-1]) / val) - 1 if val != 0 else 0.0
 
 # ==========================================
-# 3. 核心量化模型 V130
+# 3. 核心量化模型 V140
 # ==========================================
 def run_super_growth_a():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe_a()
     print("\n" + "="*65)
-    print(f"🎯 [A股 Master Sniper V130] 啟動 | 載入「能源輪動」與「弱勢清洗」引擎...")
+    print(f"🔄 [A股 Master Sniper V140] 啟動 | 載入「ROKU破底翻買回」與「IRDM預期落空平倉」引擎...")
 
     hist_all = yf.download(universe, period="1y", progress=False, threads=False)
     if hist_all.empty: return
@@ -86,14 +79,20 @@ def run_super_growth_a():
             m20, m50 = float(c.tail(20).mean()), float(c.tail(50).mean())
             ema20 = float(c.ewm(span=20, adjust=False).mean().iloc[-1])
             dist_20ema = ((p - ema20) / ema20) * 100
+            dist_50ma = ((p - m50) / m50) * 100
             
-            rs_raw = (get_ret(c, 21)*0.4) + (get_ret(c, 63)*0.4) + (get_ret(c, 126)*0.2)
+            # 分拆短、中、長期動能 (為了抓 ROKU 式底部爆發)
+            ret_21 = get_ret(c, 21)
+            ret_63 = get_ret(c, 63)
+            ret_126 = get_ret(c, 126)
+            rs_raw = (ret_21 * 0.4) + (ret_63 * 0.4) + (ret_126 * 0.2)
+            
             vol_50d_avg = float(v.tail(50).mean())
-            is_vdu = float(v.tail(3).mean()) < (vol_50d_avg * 0.75)
+            is_vdu = float(v.tail(3).mean()) < (vol_50d_avg * 0.8)
             
             tech_pool[t] = {
-                "P": p, "Dist20": dist_20ema, "Stop_Loss": m50,
-                "RS_Raw": rs_raw, "Is_VDU": is_vdu
+                "P": p, "Dist20": dist_20ema, "Dist50": dist_50ma, "Stop_Loss": m50,
+                "RS_Raw": rs_raw, "Ret21": ret_21, "Ret63": ret_63, "Is_VDU": is_vdu
             }
         except: continue
 
@@ -107,38 +106,44 @@ def run_super_growth_a():
     
     for t, data in tech_pool.items():
         info, rs = infos.get(t, {}), rs_ranks.get(t, 0)
-        
-        # 🔪 弱勢清洗 (Weakness Purge)：跌破 50MA 或 RS<55 直接斬首 (對標 QS 被踢出)
-        if data['P'] < data['Stop_Loss'] or rs < 55: 
-            continue
-            
         roe = info.get('returnOnEquity') or 0
-        div_yield = info.get('dividendYield') or 0
         sec = info.get('sector', 'Unknown')
         
-        # 評分權重：動能 + 現金流護城河 (高股息)
-        score = (rs * 0.6) + (roe * 100 * 0.2) + (div_yield * 100 * 0.2)
+        # 評分權重：動能 + ROE
+        score = (rs * 0.7) + (roe * 100 * 0.3)
         
-        # 🎯 V130 狙擊手指令 (對標截圖)
+        # 🎯 V140 核心決策樹 (IRDM vs ROKU)
         dist = data['Dist20']
-        if dist > 5.0:
-            action, msg = f"👀觀({round(dist,1)}%)", "高位乖離，抱緊觀望"
-        elif -3.5 <= dist <= -0.5 and data['Is_VDU']:
-            action, msg = f"🎯加({round(dist,1)}%)", "對標 TRGP/PWR: 完美縮量回踩，狙擊加倉"
-            score *= 1.3 # 給予狙擊買點極高權重，擠進 Top 10
-        elif dist < -4.0:
-            action, msg = f"⚠️汰({round(dist,1)}%)", "破位警告，準備清洗"
-            score *= 0.7
+        dist50 = data['Dist50']
+        
+        # ROKU 邏輯：過去中期弱(Ret63低)，但短期突然爆發(Ret21高)，且剛越過50MA(乖離<5%)
+        is_roku_turnaround = data['Ret21'] > data['Ret63'] and 0 < dist50 < 5.0 and rs > 60
+        
+        # IRDM 邏輯：短期動能突然轉負，且跌破20EMA
+        is_irdm_failure = data['Ret21'] < 0 and dist < 0 and data['P'] > data['Stop_Loss']
+        
+        if is_roku_turnaround:
+            action, msg = "🔄 困境反轉", "對標 ROKU: 短期動能爆發，強勢買回/建倉"
+            score *= 1.35 # 給予破底翻極高權重！
+        elif is_irdm_failure:
+            action, msg = "⚡ 預期落空", "對標 IRDM: 動能拖泥帶水，果斷換股"
+            score *= 0.5 # 降級，準備踢出 Top 10
+        elif data['P'] < data['Stop_Loss']:
+            continue # 跌破 50MA 直接無情清洗 (QS邏輯延續)
+        elif dist > 8.0:
+            action, msg = "🚀 讓利潤奔跑", "高位強勢，抱緊不賣"
+        elif -2.5 <= dist <= 1.0 and data['Is_VDU']:
+            action, msg = "🎯 狙擊加倉", "縮量回踩20均線，絕佳買點"
         else:
-            action, msg = f"📈抱({round(dist,1)}%)", "趨勢合理，安心持有"
+            action, msg = "📈 趨勢延續", "乖離合理，安全持有"
             
         all_cands.append({
             "Ticker": t, "Sector": sec[:10], "Score": score, "Action": action, "Msg": msg, 
-            "RS": rs, "ROE": f"{round(roe*100, 1)}%", "DIV": f"{round(div_yield*100, 1)}%", 
-            "Dist20": f"{round(dist, 1)}%", "Price": data['P'], "Hard_Stop": data['Stop_Loss']
+            "RS": rs, "ROE": f"{round(roe*100, 1)}%", "Dist20": f"{round(dist, 1)}%", 
+            "Price": data['P'], "Hard_Stop": data['Stop_Loss']
         })
 
-    # 📌 精選 Top 10 (能源板塊優先納入)
+    # 📌 精選 Top 10 
     all_cands.sort(key=lambda x: x['Score'], reverse=True)
     top_10, s_cnt = [], {}
     for r in all_cands:
@@ -151,10 +156,10 @@ def run_super_growth_a():
     allocation_per_stock = PORTFOLIO_CAPITAL / max(len(top_10), 1)
     
     matrix = []
-    headers = ["排名", "代碼", "板塊", "V130作戰指令", "行動理由", "RS_Rank", "ROE", "股息率(能源)", "價格", "🛑 50MA 止損線", "建議買入股數", "倉位佔比", "更新時間"]
+    headers = ["排名", "代碼", "板塊", "V140 大師指令", "交割單對標邏輯", "RS動能", "ROE護城河", "20EMA乖離", "當前價格", "🛑 50MA 止損線", "建議買入股數", "倉位佔比", "更新時間"]
     
-    m_status = f"VIX平穩 | 🚀 積極進攻 | 策略: 能源輪動 & 弱勢清洗 (QS遭斬首)"
-    matrix.append([f"Master Sniper V130 (A股實盤映射版)", f"更新: {update_time} | 狀態: {m_status}", ""] + [""] * 10)
+    m_status = f"策略: 無我交易 (預期落空平倉 + 破底翻買回)"
+    matrix.append([f"Master Sniper V140 (無我輪動版)", f"更新: {update_time} | 狀態: {m_status}", ""] + [""] * 10)
     matrix.append(headers)
     
     for i, r in enumerate(top_10):
@@ -164,16 +169,16 @@ def run_super_growth_a():
         
         matrix.append([
             f"T{i+1}", f"👑 {r['Ticker']}", r['Sector'], r['Action'], r['Msg'], 
-            f"{round(r['RS'], 1)}", r['ROE'], r['DIV'], 
+            f"{round(r['RS'], 1)}", r['ROE'], r['Dist20'], 
             f"¥{round(r['Price'], 2)}", f"¥{round(r['Hard_Stop'], 2)}", 
             f"{shares:,} 股", f"{round(weight_pct, 2)}%", update_time
         ])
 
-    print(f"📤 正在推送 V130 狙擊手陣型至 Google Sheets...")
+    print(f"📤 正在推送 V140 無我輪動陣型至 Google Sheets...")
     response = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     
     if response.status_code == 200:
-        print("✅ V130 數據已成功推送！準備執行能源輪動與精準狙擊。")
+        print("✅ V140 數據已成功推送！準備捕捉 ROKU 式的超級困境反轉。")
     else:
         print(f"❌ 推送失敗，狀態碼: {response.status_code}")
 
