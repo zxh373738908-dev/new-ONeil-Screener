@@ -20,12 +20,12 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3
 TARGET_SHEET = "super"
 YTD_BASE_DATE = "2025-12-31"
 
-# 💡 V96 持倉不變：大師展現「讓利潤狂奔」的持倉定力
-MASTER_CURRENT = ["ATI", "DAL", "IBKR", "IRDM", "LLY", "MNST", "MU", "PWR", "TRGP", "VIK"]
+# 💡 V97 最新持倉：砍掉破位 IRDM，無懼前次虧損勇敢買回 ROKU
+MASTER_CURRENT = ["ATI", "DAL", "IBKR", "LLY", "MNST", "MU", "PWR", "ROKU", "TRGP", "VIK"]
 
 def get_universe():
-    # 保持備選池的追蹤，隨時準備抓取下一次輪動機會
-    core_watchlist = MASTER_CURRENT + ["QS", "VRT", "FSLR", "ROKU", "ADM", "NDAQ", "NTNX", "OKTA", "TWLO", "V", "DUOL", "SNDK", "TER", "NUE"]
+    # 將 IRDM 放入觀察池，驗證破位停損的正確性
+    core_watchlist = MASTER_CURRENT + ["IRDM", "QS", "VRT", "FSLR", "ADM", "NDAQ", "NTNX", "OKTA", "TWLO", "V", "DUOL", "SNDK", "TER", "NUE"]
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', headers=headers, timeout=15)
@@ -38,7 +38,7 @@ EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate
 # ==========================================
 # 2. 數據獲取與處理
 # ==========================================
-def fetch_info_v96(t):
+def fetch_info_v97(t):
     ticker = yf.Ticker(t)
     try:
         time.sleep(random.uniform(0.1, 0.3))
@@ -56,7 +56,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V96 獲利狂奔版 同步完成！持續為您雷達鎖定。")
+        print(f"🎉 V97 動量切換版 同步完成！ROKU 已重返戰場。")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -68,14 +68,14 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V96 (Let Profits Run)
+# 3. 核心量化模型 V97 (Momentum Shift)
 # ==========================================
-def run_super_growth_v96():
+def run_super_growth_v97():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V96] 啟動 | 陣地戰模式，讓利潤狂奔...")
+    print(f"🚀 [超級成長股 V97] 啟動 | 偵測到動量切換: IRDM 出, ROKU 進...")
 
     # 1. 宏觀數據
     try:
@@ -87,8 +87,8 @@ def run_super_growth_v96():
         spy_r = {20: get_ret(spy_hist, 20), 60: get_ret(spy_hist, 60), 120: get_ret(spy_hist, 120)}
         curr_spy, ma50_spy = float(spy_hist.iloc[-1]), float(spy_hist.tail(50).mean())
         
-        weather = "☀️ 穩健攀升" if curr_spy > ma50_spy and vix_val < 22 else ("☁️ 震盪洗盤" if curr_spy > ma50_spy else "📉 跌破趨勢")
-        strategy = "🛡️ 陣地戰：死抱強勢，讓利潤狂奔" if vix_val < 20 else "⚠️ 提高警覺，緊盯停損"
+        weather = "☀️ 動能充沛" if curr_spy > ma50_spy and vix_val < 22 else ("☁️ 震盪洗盤" if curr_spy > ma50_spy else "📉 跌破趨勢")
+        strategy = "🔄 動量切換：無我境界，汰弱換強" if vix_val < 20 else "⚠️ 提高警覺，緊盯停損"
         
         bno_val = float(m_data['BNO'].dropna().iloc[-1])
         cper_val = float(m_data['CPER'].dropna().iloc[-1])
@@ -138,12 +138,12 @@ def run_super_growth_v96():
     # 3. 獲取基本面
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for t, info in executor.map(fetch_info_v96, list(tech_results.keys())):
+        for t, info in executor.map(fetch_info_v97, list(tech_results.keys())):
             if info: infos[t] = info
 
     ind_res_counts = pd.Series({t: infos.get(t, {}).get('industry', 'Unknown') for t in perfect_tickers}).value_counts().to_dict()
 
-    # 4. 🥇 V96 評分系統與動態指令
+    # 4. 🥇 V97 評分系統與動態指令
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_results.items()}).rank(pct=True) * 100).to_dict()
     all_candidates = []
     
@@ -210,9 +210,9 @@ def run_super_growth_v96():
     headers = ["排名", "代碼", "板塊", "評分", "作戰指令", "Msg標籤", "今年YTD", "60日趨勢(圖)", "REL20", "REL60", "REL120", "RS_Rank", "行業共振", "ADR", "量比", "價格", "1D%", "MktCap", "籌碼峰", "Score", "盤建", "更新時間"]
     us_breadth = (above_50ma / len(universe) * 100) if universe else 0
     
-    m_info = f"{weather} | 寬度:{us_breadth:.1f}% | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
+    m_info = f"{weather} | ROKU 重歸戰場 | 寬度:{us_breadth:.1f}% | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
     
-    matrix = [[f"Master Sniper V96 (Let Profits Run)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    matrix = [[f"Master Sniper V97 (Momentum Shift: IRDM out, ROKU in)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
     
     for i, r in enumerate(top_final):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
@@ -231,4 +231,4 @@ def run_super_growth_v96():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_super_growth_v96()
+    run_super_growth_v97()
