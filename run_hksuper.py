@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 系統配置中心 (V108 破底翻狙擊 & 滯漲換股版)
+# 1. 系統配置中心 (V109 高Beta核爆 & 再平衡版)
 # ==========================================
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3VN9a0Ilf9amoy1EtQV_GBXJkk_A4PpsrJxKzH7i51/exec"
 TARGET_SHEET = "HK_Super"
@@ -20,17 +20,18 @@ PORTFOLIO_CAPITAL = 1_000_000
 TARGET_POSITIONS = 10
 CAPITAL_PER_STOCK = PORTFOLIO_CAPITAL / TARGET_POSITIONS
 
-# 港股池 (加入 9626.HK B站，對標 ROKU 內容/平台板塊)
+# 微調港股池：加入電力設備(對標 GEV) 與 高波動平台(對標 RDDT)
 GURU_LIST_HK = [
     "0700.HK", "9988.HK", "3690.HK", "1810.HK", "1211.HK", "2015.HK", "9868.HK", "9866.HK", 
     "0981.HK", "1347.HK", "0285.HK", "6618.HK", "9999.HK", "0883.HK", "0857.HK", "0386.HK", 
     "0941.HK", "0762.HK", "0728.HK", "1088.HK", "1928.HK", "2020.HK", "6690.HK", "6862.HK",
-    "2318.HK", "0388.HK", "1299.HK", "2382.HK", "0293.HK", "1024.HK", "9626.HK",
+    "2318.HK", "0388.HK", "1299.HK", "2382.HK", "0293.HK", "1024.HK", "9626.HK", # 平台股
     "0868.HK", "3800.HK", "2899.HK", "3993.HK", "0020.HK", "1929.HK", "6049.HK", "0772.HK", 
     "1516.HK", "2269.HK", "2359.HK", "6608.HK", "9961.HK", "0268.HK", "0175.HK", "9618.HK",
     "9888.HK", "0992.HK", "1093.HK", "1177.HK", "2331.HK", "0322.HK", "0522.HK", "0836.HK",
     "0669.HK", "0151.HK", "6606.HK", "9992.HK", "9633.HK", "0867.HK", "0316.HK", "1997.HK",
-    "0293.HK", "0881.HK", "2313.HK", "0780.HK", "1088.HK", "1919.HK" 
+    "0293.HK", "0881.HK", "2313.HK", "0780.HK", "1088.HK", "1919.HK", 
+    "1072.HK", "1133.HK" # 新增東方電氣、哈爾濱電氣 (對標 GEV 電網設備)
 ]
 EXCLUDED = ['Banks', 'Real Estate', 'REIT']
 
@@ -56,15 +57,15 @@ def fetch_info_hk(t):
     return t, {}
 
 # ==========================================
-# 3. 核心量化模型 V108
+# 3. 核心量化模型 V109
 # ==========================================
-def run_super_growth_hk_v108():
+def run_super_growth_hk_v109():
     update_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
     universe = list(set(GURU_LIST_HK))
     print("\n" + "="*60)
-    print(f"🚀 [港股 Master Sniper V108] 啟動 | 洗盤回歸(破底翻) & 滯漲換股 機制")
+    print(f"🚀 [港股 Master Sniper V109] 啟動 | 高Beta核爆(RDDT) & 等權重再平衡")
 
-    # 1. 宏觀引擎與能源輪動
+    # 1. 宏觀引擎
     market_regime = "BULL (🚀積極進攻)"
     hedge_msg = "✅ 大盤多頭安全，無須對沖"
     oil_trending = False
@@ -83,8 +84,8 @@ def run_super_growth_hk_v108():
             oil_trending = True
     except: pass
 
-    # 2. 技術面、超額報酬(REL) 與 洗盤特徵(Ret5) 掃描
-    print("⏳ 掃描個股動能、洗盤特徵 與 乖離率...")
+    # 2. 技術面掃描 (波幅 ADR 與 高Beta核爆 偵測)
+    print("⏳ 掃描個股動能、高波幅特徵(ADR) 與 乖離率...")
     hist_all = yf.download(universe, period="1y", progress=False, threads=False)
     close_df = hist_all['Close']
     vol_df = hist_all['Volume']
@@ -100,7 +101,6 @@ def run_super_growth_hk_v108():
         p = float(c.iloc[-1])
         m20, m50 = float(c.tail(20).mean()), float(c.tail(50).mean())
         
-        # 嚴格流動性過濾 (大於 1元 & 日均千萬成交額)
         avg_vol_10 = float(v.tail(10).mean())
         if p < 1.0 or (avg_vol_10 * p) < 10_000_000: continue 
         if p < m50: continue 
@@ -109,15 +109,12 @@ def run_super_growth_hk_v108():
         dist_20ema = ((p - ema20) / ema20) * 100 
         vr = float(v.iloc[-1]) / float(v.tail(50).mean()) if float(v.tail(50).mean()) > 0 else 1.0
 
-        # 計算大盤與個股的相對報酬 (REL)
         hsi_ret_20 = get_ret(hsi_c, 20) if 'hsi_c' in locals() else 0
         hsi_ret_60 = get_ret(hsi_c, 60) if 'hsi_c' in locals() else 0
         rel_20 = (get_ret(c, 20) - hsi_ret_20) * 100
         rel_60 = (get_ret(c, 60) - hsi_ret_60) * 100
         
         adr = float(((high_df[t].tail(14) - low_df[t].tail(14)) / low_df[t].tail(14)).mean() * 100)
-        
-        # 🎯 V108 破底翻引擎核心：計算近 5 日報酬 (抓出 V型反轉)
         ret_5 = get_ret(c, 5) * 100
 
         tech_pool[t] = {
@@ -131,9 +128,7 @@ def run_super_growth_hk_v108():
         print("⚠️ 查無符合標的。")
         return
 
-    # 計算全市場強度排名
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
-    # 篩選動能大於 65 的股票進入基本面池
     filtered_tech_pool = {t: d for t, d in tech_pool.items() if rs_ranks.get(t, 0) >= 65}
 
     print(f"⏳ 拉取基本面 (剩餘 {len(filtered_tech_pool)} 檔合規標的)...")
@@ -154,11 +149,10 @@ def run_super_growth_hk_v108():
         fund_score = (40 if rule_of_40 > 40 else (20 if rule_of_40 > 20 else 0)) + \
                      (30 if roe > 15 else (15 if roe > 8 else 0))
         
-        # 🛢️ 能源輪動機制 (順風車加分)
-        if oil_trending and any(d in sec for d in ['Energy', 'Basic Materials']):
+        if oil_trending and any(d in sec for d in ['Energy', 'Basic Materials', 'Industrials']):
             fund_score += 25
 
-        rs, dist, vr, rel20, ret5 = rs_ranks.get(t, 0), data['Dist20EMA'], data['VR'], data['REL20'], data['Ret5']
+        rs, dist, vr, rel20, ret5, adr = rs_ranks.get(t, 0), data['Dist20EMA'], data['VR'], data['REL20'], data['Ret5'], data['ADR']
         
         tech_score = rs * 0.5 
         if vr > 1.5 and dist > 0: tech_score += 15 
@@ -166,25 +160,29 @@ def run_super_growth_hk_v108():
         total_score = fund_score + tech_score
         
         # ==========================================
-        # 🎯 V108 指令判定核心 (破底翻 vs 滯漲換股)
+        # 🎯 V109 指令判定核心 (高Beta核爆 vs 破底翻 vs 滯漲)
         # ==========================================
-        if ret5 > 4.0 and 0 <= dist <= 3.0: 
-            # 1. 近五日大漲超 4%，且剛好站回均線 -> 破底翻洗盤回歸 (復刻 ROKU)
+        if adr >= 4.5 and rel20 >= 5.0 and 0 <= dist <= 5.0 and vr > 1.2:
+            # 1. 股性極活(ADR高)、超額報酬猛、帶量在均線附近 -> 高Beta核爆 (對標 RDDT)
+            action = f"🚀核爆({dist:+.1f}%)"
+            total_score *= 1.4 # 最高級別暴力加分
+            
+        elif ret5 > 4.0 and 0 <= dist <= 3.0: 
+            # 2. 破底翻洗盤回歸
             action = f"🦅破底翻({dist:+.1f}%)"
-            total_score *= 1.35 # 給予極高權重，強制選入 Top 10
+            total_score *= 1.35 
             
         elif dist < -3.0:
-            # 2. 乖離跌破均線太深 -> 破線停損
+            # 3. 破線停損 (對標 MU 動能衰竭)
             action = f"✂️破線({dist:+.1f}%)"
             total_score *= 0.3
             
         elif rel20 < -3.0:
-            # 3. 均線沒破，但超額報酬嚴重落後大盤 -> 死錢滯漲 (復刻 IRDM)
+            # 4. 滯漲換股 (對標 PWR 漲不動)
             action = f"✂️滯漲({dist:+.1f}%)"
             total_score *= 0.4
             
         elif 0 <= dist <= 3.0:
-            # 4. 正常均線狙擊點
             action = f"🎯狙({dist:+.1f}%)" if vr > 1.2 else f"🎯加({dist:+.1f}%)"
             total_score *= 1.2
             
@@ -198,7 +196,7 @@ def run_super_growth_hk_v108():
         else:
             action = f"🛡️抱({dist:+.1f}%)"
 
-        # 倉位資金計算 (等權重)
+        # 🎯 等權重計算器：強迫每檔對齊 10% 資金
         price = data['P']
         raw_shares = CAPITAL_PER_STOCK / price
         suggested_shares = max(100, round(raw_shares / 100) * 100)
@@ -206,14 +204,13 @@ def run_super_growth_hk_v108():
 
         all_cands.append({
             "Ticker": t, "Sector": sec, "Industry": ind[:10], "Score": total_score, "Action": action, 
-            "REL20": f"{rel20:+.1f}%", "REL60": f"{data['REL60']:+.1f}%", "ADR": f"{round(data['ADR'], 1)}%",
+            "REL20": f"{rel20:+.1f}%", "REL60": f"{data['REL60']:+.1f}%", "ADR": f"{round(adr, 1)}%",
             "VR": f"{round(vr, 2)}x", "Price": f"HK${round(price, 2)}",
             "Shares": f"{suggested_shares} 股", "Alloc": f"{round(actual_alloc, 1)}%",
             "Trend": f'=SPARKLINE({{{data["Spark"]}}}, {{"charttype","line";"color","red"}})', 
-            "RS": f"{round(rs, 1)} 分"  # V107 修復的 UI 防呆，避免變成 10000%
+            "RS": f"{round(rs, 1)} 分"
         })
 
-    # 精煉 Top 10 (同板塊最高 3 檔)
     all_cands.sort(key=lambda x: x['Score'], reverse=True)
     top_10, sec_cnt = [], {}
     for r in all_cands:
@@ -223,11 +220,12 @@ def run_super_growth_hk_v108():
         sec_cnt[s] = sec_cnt.get(s, 0) + 1
         if len(top_10) >= TARGET_POSITIONS: break
     
-    headers = ["代碼", "板塊", "評分", "60日走勢", "作戰指令(破底翻/滯漲)", "超額REL20", "超額REL60", "RS_Rank", "ADR波幅", "量比", "價格", "建議股數", "資金佔比", "更新時間"]
+    # 表頭明示「等權重」與「核爆」指令
+    headers = ["代碼", "板塊", "評分", "60日走勢", "作戰指令(核爆/破底)", "超額REL20", "超額REL60", "RS_Rank", "ADR波幅", "量比", "價格", "等權重股數(10%)", "資金佔比", "更新時間"]
     hedge_row = ["🛡️ 宏觀對沖", "放空指令", "-", "-", hedge_msg, "-", "-", "-", "-", "-", "-", "-", "-", update_time]
 
-    m_status = f"更新: {update_time} | 狀態: {market_regime} | 🛢️ 能源輪動: {'ON' if oil_trending else 'OFF'} | 新增 🦅破底翻 & ✂️滯漲換股"
-    matrix = [[f"Master Sniper V108 (Shakeout & Swap)", m_status, ""] + [""] * 11, headers]
+    m_status = f"更新: {update_time} | 狀態: {market_regime} | 新增 🚀高Beta核爆(對標RDDT) & 嚴格等權重再平衡"
+    matrix = [[f"Master Sniper V109 (High Beta & Equal Weight)", m_status, ""] + [""] * 11, headers]
     
     for i, r in enumerate(top_10):
         matrix.append([
@@ -239,11 +237,11 @@ def run_super_growth_hk_v108():
     matrix.append(["-" * 10] * 14)
     matrix.append(hedge_row) 
 
-    print("📤 推送 V108 策略數據至 Google Sheets...")
+    print("📤 推送 V109 策略數據至 Google Sheets...")
     response = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     
-    if response.status_code == 200: print("✅ V108 數據推送成功！")
+    if response.status_code == 200: print("✅ V109 數據推送成功！")
     else: print(f"❌ 推送失敗，狀態碼: {response.status_code}")
 
 if __name__ == "__main__":
-    run_super_growth_hk_v108()
+    run_super_growth_hk_v109()
