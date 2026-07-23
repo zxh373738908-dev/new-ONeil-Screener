@@ -20,12 +20,12 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3
 TARGET_SHEET = "super"
 YTD_BASE_DATE = "2025-12-31"
 
-# 💡 V98 最新持倉：獲利收割 MU/PWR，擁抱新動能 RDDT/GEV，等權重再平衡
-MASTER_CURRENT = ["ATI", "DAL", "GEV", "IBKR", "LLY", "MNST", "RDDT", "ROKU", "TRGP", "VIK"]
+# 💡 V99 史詩級大清洗：保留 ATI/ROKU/TRGP，新增 7 檔猛獸
+MASTER_CURRENT = ["ATI", "HST", "JBHT", "PRM", "ROIV", "ROKU", "STT", "TRGP", "VSAT", "YOU"]
 
 def get_universe():
-    # 將 MU, PWR 放入觀察池，驗證收割邏輯
-    core_watchlist = MASTER_CURRENT + ["MU", "PWR", "IRDM", "QS", "VRT", "FSLR", "ADM", "NDAQ", "NTNX", "OKTA", "TWLO", "V", "DUOL", "SNDK", "TER", "NUE"]
+    # 將被無情拋售的 7 檔老將放入觀察池，用以驗證它們是否真的動能破位
+    core_watchlist = MASTER_CURRENT + ["DAL", "GEV", "IBKR", "LLY", "MNST", "RDDT", "VIK", "MU", "PWR", "IRDM", "QS", "VRT", "FSLR", "ADM", "SNDK", "TER", "NUE"]
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', headers=headers, timeout=15)
@@ -38,7 +38,7 @@ EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate
 # ==========================================
 # 2. 數據獲取與處理
 # ==========================================
-def fetch_info_v98(t):
+def fetch_info_v99(t):
     ticker = yf.Ticker(t)
     try:
         time.sleep(random.uniform(0.1, 0.3))
@@ -56,7 +56,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V98 等權重與新動能版 同步完成！RDDT 與 GEV 已鎖定。")
+        print(f"🎉 V99 大清洗與中盤輪動版 同步完成！全新 10 檔猛獸已鎖定。")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -68,14 +68,14 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V98 (Rebalance & Fresh Momentum)
+# 3. 核心量化模型 V99 (Massive Purge & Rotation)
 # ==========================================
-def run_super_growth_v98():
+def run_super_growth_v99():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V98] 啟動 | 偵測到動量再平衡: RDDT/GEV 進, MU/PWR 出...")
+    print(f"🚀 [超級成長股 V99] 啟動 | 偵測到史詩級調倉: 7 檔換血，重塑等權重陣列...")
 
     # 1. 宏觀數據
     try:
@@ -87,8 +87,8 @@ def run_super_growth_v98():
         spy_r = {20: get_ret(spy_hist, 20), 60: get_ret(spy_hist, 60), 120: get_ret(spy_hist, 120)}
         curr_spy, ma50_spy = float(spy_hist.iloc[-1]), float(spy_hist.tail(50).mean())
         
-        weather = "☀️ 動能充沛" if curr_spy > ma50_spy and vix_val < 22 else ("☁️ 震盪洗盤" if curr_spy > ma50_spy else "📉 跌破趨勢")
-        strategy = "⚖️ 等權重再平衡：收割老將，擁抱新動能" if vix_val < 20 else "⚠️ 提高警覺，緊盯停損"
+        weather = "☀️ 資金輪動" if curr_spy > ma50_spy and vix_val < 22 else ("☁️ 震盪洗盤" if curr_spy > ma50_spy else "📉 跌破趨勢")
+        strategy = "🌪️ 史詩級清洗：無情汰弱，鎖定新爆發點" if vix_val < 20 else "⚠️ 提高警覺，緊盯停損"
         
         bno_val = float(m_data['BNO'].dropna().iloc[-1])
         cper_val = float(m_data['CPER'].dropna().iloc[-1])
@@ -138,12 +138,12 @@ def run_super_growth_v98():
     # 3. 獲取基本面
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for t, info in executor.map(fetch_info_v98, list(tech_results.keys())):
+        for t, info in executor.map(fetch_info_v99, list(tech_results.keys())):
             if info: infos[t] = info
 
     ind_res_counts = pd.Series({t: infos.get(t, {}).get('industry', 'Unknown') for t in perfect_tickers}).value_counts().to_dict()
 
-    # 4. 🥇 V98 評分系統與動態指令
+    # 4. 🥇 V99 評分系統與動態指令
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_results.items()}).rank(pct=True) * 100).to_dict()
     all_candidates = []
     
@@ -153,6 +153,7 @@ def run_super_growth_v98():
         sec, ind = str(info.get('sector', 'Unknown')), str(info.get('industry', 'Unknown'))
         
         is_master = t in MASTER_CURRENT
+        # 大師特權豁免，確保 HST(地產) 等被排斥板塊也能入榜
         if not is_master and any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
         
         rs = rs_ranks.get(t, 0)
@@ -210,9 +211,9 @@ def run_super_growth_v98():
     headers = ["排名", "代碼", "板塊", "評分", "作戰指令", "Msg標籤", "今年YTD", "60日趨勢(圖)", "REL20", "REL60", "REL120", "RS_Rank", "行業共振", "ADR", "量比", "價格", "1D%", "MktCap", "籌碼峰", "Score", "盤建", "更新時間"]
     us_breadth = (above_50ma / len(universe) * 100) if universe else 0
     
-    m_info = f"{weather} | 等權重再平衡: 新兵 RDDT/GEV 入陣 | 寬度:{us_breadth:.1f}% | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
+    m_info = f"{weather} | 大清洗：淘汰 70% 老將，猛獸級新兵入陣 | 寬度:{us_breadth:.1f}% | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
     
-    matrix = [[f"Master Sniper V98 (Rebalance & Fresh Momentum)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    matrix = [[f"Master Sniper V99 (Massive Purge & Mid-Cap Rotation)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
     
     for i, r in enumerate(top_final):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
@@ -231,4 +232,4 @@ def run_super_growth_v98():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_super_growth_v98()
+    run_super_growth_v99()
