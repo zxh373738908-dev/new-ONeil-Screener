@@ -20,11 +20,10 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3
 TARGET_SHEET = "super"
 YTD_BASE_DATE = "2025-12-31"
 
-# 💡 V100 里程碑：科技股全面回歸！神預言 HPE 入陣，AMD 重磅回歸
+# 💡 維持大師最新科技股陣容
 MASTER_CURRENT = ["AMD", "ARW", "ATI", "FTNT", "HPE", "HST", "STT", "VIK", "VSAT"]
 
 def get_universe():
-    # 將上一波汰換的股票放入備選池，持續追蹤動能
     core_watchlist = MASTER_CURRENT + ["JBHT", "PRM", "ROIV", "ROKU", "TRGP", "YOU", "DAL", "GEV", "IBKR", "LLY", "MNST", "RDDT", "MU", "PWR", "IRDM", "QS", "VRT", "FSLR", "SNDK"]
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -38,7 +37,7 @@ EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate
 # ==========================================
 # 2. 數據獲取與處理
 # ==========================================
-def fetch_info_v100(t):
+def fetch_info_v101(t):
     ticker = yf.Ticker(t)
     try:
         time.sleep(random.uniform(0.1, 0.3))
@@ -56,7 +55,7 @@ def sync_to_google_sheet(sheet_name, matrix):
     try:
         payload = {"sheet_name": sheet_name, "data": json.loads(json.dumps(matrix, default=str))}
         requests.post(WEBAPP_URL, json=payload, timeout=50)
-        print(f"🎉 V100 科技復甦與里程碑版 同步完成！大師的底牌已鎖定。")
+        print(f"🎉 V101 先勝後戰(籌碼突破)版 同步完成！已鎖定紅黑線結構。")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
 def get_ret(series, days):
@@ -68,14 +67,14 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 # ==========================================
-# 3. 核心量化模型 V100 (Tech Resurgence)
+# 3. 核心量化模型 V101 (First Win Then Fight)
 # ==========================================
-def run_super_growth_v100():
+def run_super_growth_v101():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*50)
-    print(f"🚀 [超級成長股 V100] 啟動 | 神預言 HPE 命中，科技板塊全面接管...")
+    print(f"🚀 [超級成長股 V101] 啟動 | 注入 VWMA 與籌碼紅黑線戰法...")
 
     # 1. 宏觀數據
     try:
@@ -87,8 +86,8 @@ def run_super_growth_v100():
         spy_r = {20: get_ret(spy_hist, 20), 60: get_ret(spy_hist, 60), 120: get_ret(spy_hist, 120)}
         curr_spy, ma50_spy = float(spy_hist.iloc[-1]), float(spy_hist.tail(50).mean())
         
-        weather = "☀️ 科技復甦" if curr_spy > ma50_spy and vix_val < 22 else ("☁️ 震盪洗盤" if curr_spy > ma50_spy else "📉 跌破趨勢")
-        strategy = "🚀 滿血進攻：擁抱半導體與高 Alpha 科技股" if vix_val < 20 else "⚠️ 提高警覺，緊盯停損"
+        weather = "☀️ 籌碼穩健" if curr_spy > ma50_spy and vix_val < 22 else ("☁️ 震盪尋底" if curr_spy > ma50_spy else "📉 跌破趨勢")
+        strategy = "🎯 先勝後戰：確認紅黑線突破後狙擊" if vix_val < 20 else "⚠️ 提高警覺，緊盯停損"
         
         bno_val = float(m_data['BNO'].dropna().iloc[-1])
         cper_val = float(m_data['CPER'].dropna().iloc[-1])
@@ -98,40 +97,65 @@ def run_super_growth_v100():
         print(f"⚠️ 宏觀數據獲取異常: {e}")
         weather, vix_val, spy_r, strategy, macro_text = "❓", 19.0, {20:0,60:0,120:0}, "數據同步", "掃描中"
 
-    # 2. 技術面深度掃描
+    # 2. 技術面深度掃描 (💡 導入 VWMA 與 紅黑線結構)
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df = hist_all['Close']
+    vol_df = hist_all['Volume']
 
     tech_results, above_50ma, perfect_tickers = {}, 0, []
     for t in universe:
         try:
-            if t not in close_df.columns: continue
+            if t not in close_df.columns or t not in vol_df.columns: continue
             c = close_df[t].dropna()
+            v = vol_df[t].dropna()
             if len(c) < 150: continue 
             
             p = float(c.iloc[-1])
+            p_prev = float(c.iloc[-2])
             m20, m50, m200 = c.tail(20).mean(), c.tail(50).mean(), c.tail(200).mean()
+            ema20 = c.ewm(span=20, adjust=False).mean().iloc[-1]
+            
+            # 💡 計算 VWMA (20日成交量加權移動平均)
+            vwma20 = (c.tail(20) * v.tail(20)).sum() / v.tail(20).sum()
+            vwma20_prev = (c.iloc[-21:-1] * v.iloc[-21:-1]).sum() / v.iloc[-21:-1].sum()
+            
+            # 💡 戰略線設定：紅線 (近期10日頸線) 與 黑線 (60日宏觀前高)
+            red_line = c.iloc[-11:-1].max() # 不含今天的近10日高點
+            black_line = c.tail(60).max()   # 60日高點
             
             if p > m50: above_50ma += 1
             if p > m20 > m50 > m200: perfect_tickers.append(t)
             
-            # 實盤股票不因 MA50 破位被強制過濾
             if not (p > m50) and t not in MASTER_CURRENT: continue 
             
-            ema20 = c.ewm(span=20, adjust=False).mean().iloc[-1]
             risk = ((ema20 - p) / p) * 100 
             
-            spark_data = ",".join([str(round(v, 2)) for v in c.tail(60).tolist()])
+            # 💡 判斷「先勝」結構 (結構突破標籤)
+            struct_msg = ""
+            if p > black_line * 0.99: 
+                struct_msg = "🚀真空區" # 突破黑線，上方無壓
+            elif p > red_line and p_prev <= red_line and p > vwma20:
+                struct_msg = "⚡紅線突破" # 今天剛帶量突破紅線與VWMA
+            elif p > vwma20 and p_prev <= vwma20_prev:
+                struct_msg = "📈穿成本線"
+            elif p < vwma20:
+                struct_msg = "⚠️成本壓制"
+            else:
+                struct_msg = "盤整中"
+
+            spark_data = ",".join([str(round(val, 2)) for val in c.tail(60).tolist()])
             spark_formula = f'=SPARKLINE({{{spark_data}}}, {{"charttype","line";"linewidth",2;"color","blue"}})'
             
+            vol_ratio = v.iloc[-1] / v.tail(20).mean()
+            
             tech_results[t] = {
-                "Price": p, "1D": (c.iloc[-1]/c.iloc[-2])-1,
-                "Trend": spark_formula, "Dist": risk,
-                "VolRatio": hist_all['Volume'][t].iloc[-1] / hist_all['Volume'][t].tail(20).mean() if t in hist_all['Volume'] else 1,
+                "Price": p, "1D": (p/p_prev)-1,
+                "Trend": spark_formula, "Dist": risk, "Struct": struct_msg,
+                "VolRatio": vol_ratio,
                 "RS_Raw": (get_ret(c, 21) * 0.4) + (get_ret(c, 63) * 0.3) + (get_ret(c, 126) * 0.3),
                 "YTD": (p / c.loc[c.index <= YTD_BASE_DATE].iloc[-1]) - 1 if not c.loc[c.index <= YTD_BASE_DATE].empty else 0,
                 "ADR": ((hist_all['High'][t].dropna() - hist_all['Low'][t].dropna()) / hist_all['Low'][t].dropna()).tail(20).mean() * 100,
-                "H60": hist_all['High'][t].tail(60).max(), "Tight": (c.tail(15).std() / c.tail(15).mean()) * 100,
+                "H60": black_line, "Tight": (c.tail(15).std() / c.tail(15).mean()) * 100,
                 "REL20": get_ret(c, 20) - spy_r[20], "REL60": get_ret(c, 60) - spy_r[60], "REL120": get_ret(c, 120) - spy_r[120]
             }
         except Exception as e: 
@@ -140,12 +164,12 @@ def run_super_growth_v100():
     # 3. 獲取基本面
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for t, info in executor.map(fetch_info_v100, list(tech_results.keys())):
+        for t, info in executor.map(fetch_info_v101, list(tech_results.keys())):
             if info: infos[t] = info
 
     ind_res_counts = pd.Series({t: infos.get(t, {}).get('industry', 'Unknown') for t in perfect_tickers}).value_counts().to_dict()
 
-    # 4. 🥇 V100 評分系統與動態指令
+    # 4. 🥇 V101 評分系統與「先勝後戰」動態指令
     rs_ranks = (pd.Series({t: d['RS_Raw'] for t, d in tech_results.items()}).rank(pct=True) * 100).to_dict()
     all_candidates = []
     
@@ -164,23 +188,35 @@ def run_super_growth_v100():
         if risk_val < -10.0: score *= 0.7  
         if risk_val < -15.0: score *= 0.4  
         
+        # 如果進入🚀真空區或⚡紅線突破，給予額外動量加分 (這就是先勝邏輯的體現)
+        if "真空區" in data['Struct'] or "紅線突破" in data['Struct']:
+            score *= 1.1 
+            
         if is_master: score += 10000 
         
         risk_int = int(round(risk_val))
         if risk_int == 0: risk_int = 0 
         risk_fmt = f"{risk_int}%"
         
+        # 💡 結合「結構狀態」與「乖離率」給出最終作戰指令
         if is_master:
             if risk_val < -10.0: action = f"🛡️抱({risk_fmt})"
             elif -3.0 <= risk_val <= 1.0: action = f"🎯加({risk_fmt})"
             else: action = f"👀觀({risk_fmt})"
         else:
-            if rs < 85: action = f"⚠️汰({risk_fmt})" 
-            elif -3.0 <= risk_val <= 1.0: action = f"🎯狙({risk_fmt})"
-            else: action = f"🔍列({risk_fmt})"
+            if rs < 85: 
+                action = f"⚠️汰({risk_fmt})" 
+            elif -3.0 <= risk_val <= 1.0:
+                # 只有結構上沒有受阻的股票，才允許狙擊！(先勝後戰)
+                if "壓制" not in data['Struct']:
+                    action = f"🎯狙({risk_fmt})"
+                else:
+                    action = f"🚧等突破({risk_fmt})"
+            else: 
+                action = f"🔍列({risk_fmt})"
 
         op_margin = int(info.get('operatingMargins', 0) * 100) if info.get('operatingMargins') else 0
-        msg = f"利{op_margin}"
+        msg = f"{data['Struct']}|利{op_margin}"
         if data['VolRatio'] > 1.3: msg += f"|爆"
         if data['Tight'] < 3.2: msg += f"|收"
 
@@ -209,12 +245,12 @@ def run_super_growth_v100():
         if len(top_final) >= 20: break
 
     # 5. 精確輸出
-    headers = ["排名", "代碼", "板塊", "評分", "作戰指令", "Msg標籤", "今年YTD", "60日趨勢(圖)", "REL20", "REL60", "REL120", "RS_Rank", "行業共振", "ADR", "量比", "價格", "1D%", "MktCap", "籌碼峰", "Score", "盤建", "更新時間"]
+    headers = ["排名", "代碼", "板塊", "評分", "作戰指令", "Msg標籤(結構)", "今年YTD", "60日趨勢(圖)", "REL20", "REL60", "REL120", "RS_Rank", "行業共振", "ADR", "量比", "價格", "1D%", "MktCap", "籌碼峰", "Score", "盤建", "更新時間"]
     us_breadth = (above_50ma / len(universe) * 100) if universe else 0
     
-    m_info = f"{weather} | 科技全面接管，神預言 HPE 入陣 | 寬度:{us_breadth:.1f}% | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
+    m_info = f"{weather} | 導入VWMA與紅黑線，先勝後戰模式 | 寬度:{us_breadth:.1f}% | VIX:{round(vix_val, 1)} | {strategy} | {macro_text}"
     
-    matrix = [[f"Master Sniper V100 (Tech Resurgence & Prediction Hit)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
+    matrix = [[f"Master Sniper V101 (First Win Then Fight)", f"更新: {update_time}", m_info] + [""] * (len(headers) - 3), headers]
     
     for i, r in enumerate(top_final):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
@@ -233,4 +269,4 @@ def run_super_growth_v100():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_super_growth_v100()
+    run_super_growth_v101()
