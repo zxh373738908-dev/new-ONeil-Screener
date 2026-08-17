@@ -13,9 +13,8 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # 1. 系統配置中心 (V113 市場領導股・動量矩陣版)
 # ==========================================
-# 更新為指定的 Web App URL
+# 已經更新為您最新提供的 Web App URL
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1fIw-8zcKpj8ALoSYszw8dG9SXsps63nXHnwRDOT2vWoXP6hf58t4XIkWnWvN4iUj/exec"
-# 更新為指定的 Google Sheet 分頁名稱
 TARGET_SHEET = "HKv7-Share Screener"
 
 PORTFOLIO_CAPITAL = 1_000_000  
@@ -118,13 +117,8 @@ def run_super_growth_hk_v113():
                 is_ma_up = rs_ma50.iloc[-1] > rs_ma50.iloc[-10] 
                 rs_trend_ok = is_above_ma and is_ma_up
 
-        # 保留 VWAP 特徵作為回踩參考
-        typical_price = (h + l + c) / 3
-        vwap_20 = float((typical_price * v).tail(20).sum() / v.tail(20).sum())
-        dist_vwap = ((p - vwap_20) / vwap_20) * 100
-
         tech_pool[t] = {
-            "P": p, "DistVWAP": dist_vwap,
+            "P": p, 
             "Ret_1M": ret_1m, "Ret_3M": ret_3m, "Ret_6M": ret_6m,
             "RSI_14": rsi_14, "RS_Trend_OK": rs_trend_ok,
             "Spark": ",".join([str(round(val, 2)) for val in c.tail(126).tolist()])
@@ -234,7 +228,7 @@ def run_super_growth_hk_v113():
     response = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     
     if response.status_code == 200: 
-        print(f"✅ V113 數據推送請求成功！Google 回傳訊息: {response.text}")
+        print(f"✅ V113 數據推送請求成功！Google 回傳: {response.text}")
     else: 
         print(f"❌ 推送失敗，狀態碼: {response.status_code}, 錯誤訊息: {response.text}")
 
