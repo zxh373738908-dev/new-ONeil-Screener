@@ -61,7 +61,7 @@ def f_price(v): return f"${round(v, 2)}" if not pd.isna(v) else "$0.00"
 def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 
 def fetch_info(t):
-    """抓取基本面數據與市值"""
+    """抓取基本面數據與市值 (加入防呆)"""
     ticker = yf.Ticker(t)
     try:
         time.sleep(random.uniform(0.05, 0.12))
@@ -72,7 +72,8 @@ def fetch_info(t):
     except: pass
     try:
         fast = ticker.fast_info
-        return t, {'industry': 'Technology/Energy', 'sector': 'Growth', 'marketCap': fast.market_cap, 'revenueGrowth': 0.15}
+        mcap = getattr(fast, 'market_cap', 0) or 0
+        return t, {'industry': 'Technology/Energy', 'sector': 'Growth', 'marketCap': mcap, 'revenueGrowth': 0.15}
     except: return t, {}
 
 def sync_to_google_sheet(sheet_name, matrix):
@@ -130,7 +131,6 @@ def run_momentum_screener_v103():
 
     valid_tickers = list(set(s_20.index) & set(s_60.index) & set(s_120.index))
     
-    # 按照文章百分位排名公式計算
     r20_rank = (s_20.loc[valid_tickers].rank(pct=True) * 100).round(1).to_dict()
     r60_rank = (s_60.loc[valid_tickers].rank(pct=True) * 100).round(1).to_dict()
     r120_rank = (s_120.loc[valid_tickers].rank(pct=True) * 100).round(1).to_dict()
@@ -206,9 +206,12 @@ def run_momentum_screener_v103():
     for t, data in stock_analysis.items():
         if t not in infos: continue
         info = infos[t]
-        ind = str(info.get('industry', 'Unknown'))
-        sec = str(info.get('sector', 'Unknown'))
-        mcap = info.get('marketCap', 0) / 1e9  # 單位：十億美元 (Billion)
+        ind = str(info.get('industry') or 'Unknown')
+        sec = str(info.get('sector') or 'Unknown')
+        
+        # 💡 防呆修復：處理 None 值
+        mcap_val = info.get('marketCap')
+        mcap = (float(mcap_val) / 1e9) if mcap_val is not None else 0.0
         
         is_master = t in MASTER_CURRENT
         if not is_master and any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
@@ -248,15 +251,17 @@ def run_momentum_screener_v103():
             else:
                 action = f"👀觀望({dist_fmt})"
 
-        # 綜合排序分數 (以 TotalRank 為核心，結合突破與 RS 強度)
+        # 綜合排序分數
         final_score = total_rank
         if data['RS_Strong']: final_score += 5
         if data['IsBreakout']: final_score += 5
         if 40 <= rsi <= 60: final_score += 3
-        if is_master: final_score += 1000  # 確保自選龍頭優先列出
+        if is_master: final_score += 1000  # 確保核心自選優先列出
+
+        name_val = str(info.get('shortName') or info.get('longName') or t)[:18]
 
         candidates.append({
-            "Ticker": t, "Name": info.get('shortName', t)[:18], "Industry": ind, "Sector": sec,
+            "Ticker": t, "Name": name_val, "Industry": ind, "Sector": sec,
             "MCap": mcap, "Price": data['Price'], "1D": data['1D'], "Trend": data['Trend'],
             "20R": data['20R'], "60R": data['60R'], "120R": data['120R'], "TotalRank": total_rank,
             "RSI": round(rsi, 1), "Action": action, "Msg": msg_str, "ADR": data['ADR'],
@@ -267,7 +272,7 @@ def run_momentum_screener_v103():
     # 依綜合分數降序排列
     candidates.sort(key=lambda x: x['Score'], reverse=True)
 
-    # 取前 35 檔領導股 (兼顧板塊分散度)
+    # 取前 35 檔領導股
     top_leaders, sec_count = [], {}
     for r in candidates:
         is_master = r['Ticker'] in MASTER_CURRENT
