@@ -1,270 +1,240 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import datetime, time, requests, json, math, warnings
+import datetime
+import requests
+import warnings
+import time
+import random
+from concurrent.futures import ThreadPoolExecutor
 
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 配置中心
+# 1. 系統配置中心 (V113 市場領導股・動量矩陣版)
 # ==========================================
+# 更新為指定的 Web App URL
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwfstK4Xq1DXft4U3_Qg9pjCQ5Qp0FiIskzrKnT1VFdRiH5FFyk6Iikv0FAcZNrPtp-/exec"
+# 更新為指定的 Google Sheet 分頁名稱
+TARGET_SHEET = "HKv7-Share Screener"
 
-TOTAL_CAPITAL = 1000000 
-MAX_RISK_PER_STOCK = 0.008 
+PORTFOLIO_CAPITAL = 1_000_000  
+TARGET_POSITIONS = 10
+AVAILABLE_CAPITAL = PORTFOLIO_CAPITAL * 0.95 
+TARGET_VALUE_PER_STOCK = AVAILABLE_CAPITAL / TARGET_POSITIONS 
+BENCHMARK_INDEX = "^HSI" # 引入恆生指數作為計算 RS Line 的大盤基準
 
-# 核心监控（必出标的）
-LEADER_WATCH =["0700.HK", "3690.HK", "9988.HK", "1211.HK", "1810.HK"]
+GURU_LIST_HK = [
+    "0700.HK", "9988.HK", "3690.HK", "1810.HK", "1211.HK", "2015.HK", "9868.HK", "9866.HK", 
+    "0981.HK", "1347.HK", "0285.HK", "6618.HK", "9999.HK", "0883.HK", "0857.HK", "0386.HK", 
+    "0941.HK", "0762.HK", "0728.HK", "1088.HK", "1928.HK", "2020.HK", "6690.HK", "6862.HK",
+    "2318.HK", "0388.HK", "1299.HK", "2382.HK", "0293.HK", "1024.HK", "9626.HK",
+    "0868.HK", "3800.HK", "2899.HK", "3993.HK", "0020.HK", "1929.HK", "6049.HK", "0772.HK", 
+    "1516.HK", "2269.HK", "2359.HK", "6608.HK", "9961.HK", "0268.HK", "0175.HK", "9618.HK",
+    "9888.HK", "0992.HK", "1093.HK", "1177.HK", "2331.HK", "0322.HK", "0522.HK", "0836.HK",
+    "0669.HK", "0151.HK", "6606.HK", "9992.HK", "9633.HK", "0867.HK", "0316.HK", "1997.HK",
+    "0293.HK", "0881.HK", "2313.HK", "0780.HK", "1088.HK", "1919.HK", 
+    "1072.HK", "1133.HK", "0005.HK", "2618.HK", "1833.HK" 
+]
 
-CORE_TICKERS_HK = list(set(LEADER_WATCH +[
-    "0941.HK", "2318.HK", "0005.HK", "9999.HK", "0883.HK",
-    "1024.HK", "1299.HK", "2015.HK", "9618.HK", "0939.HK",
-    "1398.HK", "2331.HK", "2020.HK", "1177.HK", "2269.HK", "0388.HK"
-]))
+def get_ret(series, days):
+    if series is None or len(series) < days + 1: return 0.0
+    val = float(series.iloc[-(days+1)])
+    return (float(series.iloc[-1]) / val) - 1 if val != 0 else 0.0
 
-# 常用行业自动汉化字典
-INDUSTRY_MAP = {
-    "Internet Content & Information": "互联网",
-    "Electronic Gaming & Multimedia": "电子游戏",
-    "Banks - Diversified": "综合银行",
-    "Banks - Regional": "区域银行",
-    "Insurance - Life": "人寿保险",
-    "Telecom Services": "电信服务",
-    "Oil & Gas Integrated": "油气开采",
-    "Auto Manufacturers": "汽车制造",
-    "Restaurants": "餐饮",
-    "Consumer Electronics": "消费电子",
-    "Software - Application": "应用软件",
-    "Retail - Apparel & Specialty": "专业零售",
-    "Real Estate - Development": "房地产开发"
-}
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ema_up = up.ewm(com=period-1, adjust=False).mean()
+    ema_down = down.ewm(com=period-1, adjust=False).mean()
+    rs = ema_up / ema_down
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
-# ==========================================
-# 🧠 2. 量子哨兵演算法 (V1002 超感矩阵版)
-# ==========================================
-def calculate_sentinel_metrics(df, hsi_series, rs_rank_series):
-    try:
-        if df is None or df.empty or len(df) < 60: return None
-        
-        close = df['Close'].ffill()
-        high = df['High'].ffill()
-        low = df['Low'].ffill()
-        vol = df['Volume'].ffill()
-        cp = float(close.iloc[-1])
-        
-        # A. 均线与偏离度 (Bias/Ext_50)
-        ma10 = float(close.rolling(10).mean().iloc[-1])
-        ma50 = float(close.rolling(50).mean().iloc[-1])
-        is_bull = cp > ma50
-        ext_50 = ((cp - ma50) / ma50) * 100 
-        
-        # B. 横向与纵向 RS 数据
-        bench_aligned = hsi_series.reindex(close.index).ffill()
-        rs_line = (close / bench_aligned).dropna()
-        if len(rs_line) < 20: return None
-        
-        rs_ma20 = rs_line.rolling(20).mean()
-        rs_awakening = float(rs_line.iloc[-1]) > float(rs_ma20.iloc[-1])
-        current_rs_rank = float(rs_rank_series.iloc[-1]) if not rs_rank_series.empty else 50
-        
-        # C. 紧致度 & ADR
-        tightness = float((close.tail(10).std() / close.tail(10).mean()) * 100)
-        adr = float(((high - low) / low).tail(20).mean() * 100)
-        
-        # D. 量能与口袋枢轴
-        v_slice = vol.iloc[-11:-1].values
-        c_slice = close.iloc[-11:-1].values
-        c_prev_slice = close.iloc[-12:-2].values
-        neg_vol_list = v_slice[c_slice < c_prev_slice]
-        max_neg_vol = float(np.max(neg_vol_list)) if len(neg_vol_list) > 0 else 9e15
-        
-        is_pocket = (cp > float(close.iloc[-2])) and (float(vol.iloc[-1]) > max_neg_vol)
-        vol_ma20 = float(vol.rolling(20).mean().iloc[-1])
-        vol_ratio = float(vol.iloc[-1] / vol_ma20) if vol_ma20 > 0 else 0
-
-        # E. 信号共振探测
-        is_singularity = (tightness < 2.5) and (current_rs_rank > 75) and (-2.0 <= ext_50 <= 2.0)
-        p_min_10 = float(close.iloc[-10:].min())
-        rs_max_10 = float(rs_line.iloc[-10:-1].max())  
-        is_price_weak = cp <= (p_min_10 * 1.02)
-        is_rs_breakout = float(rs_line.iloc[-1]) > rs_max_10
-        is_rs_divergence = is_price_weak and is_rs_breakout
-
-        # F. 动态评分与信号 (Resonance / Action)
-        score = 0
-        signals =[]
-        
-        if is_singularity: signals.append("👑圣杯共振"); score += 8
-        if is_rs_divergence: signals.append("★RS背离"); score += 6
-        if is_pocket: signals.append("🎯口袋枢轴"); score += 4
-        if rs_awakening: signals.append("🔔RS觉醒"); score += 3
-        if tightness < 1.8: signals.append("👁️紧致"); score += 2
-        if cp > ma10: score += 1
-
-        is_zombie = (vol_ratio < 0.5) and not (is_singularity or is_rs_divergence or is_pocket)
-        
-        if is_singularity: rating = "🏆 奇点觉醒 (圣杯)"
-        elif is_rs_divergence: rating = "☢️ 机构暗吸 (背离)"
-        elif is_zombie: rating = "🧟 缩量僵尸"; score -= 3
-        elif is_bull and score >= 6: rating = "💎 SSS 统帅"
-        elif is_bull: rating = "🔥 多头趋势"
-        elif cp > ma10: rating = "✅ 短线转强"
-        else: rating = "❄️ 均线压制"
-
-        # ================= NEW: 全维度收益与趋势数据 =================
-        # 1D 当日涨跌幅
-        ret_1d = float(close.pct_change(1).iloc[-1] * 100) if len(close) > 1 else 0
-
-        # 60D Trend: 判断 MA60 的最新斜率与相对位置
-        ma60 = close.rolling(60).mean()
-        ma60_now = float(ma60.iloc[-1])
-        ma60_prev = float(ma60.iloc[-20])  # 取20天前的MA60做斜率参考
-        if cp > ma60_now and ma60_now > ma60_prev: trend_60d = "↗ 多头排列"
-        elif cp < ma60_now and ma60_now < ma60_prev: trend_60d = "↘ 空头排列"
-        else: trend_60d = "→ 震荡整理"
-
-        # REL绝对收益矩阵 (REL5/20/60/120)
-        rel_5   = float(close.pct_change(5).iloc[-1] * 100) if len(close) > 5 else 0
-        rel_20  = float(close.pct_change(20).iloc[-1] * 100) if len(close) > 20 else 0
-        rel_60  = float(close.pct_change(60).iloc[-1] * 100) if len(close) > 60 else 0
-        rel_120 = float(close.pct_change(120).iloc[-1] * 100) if len(close) > 120 else 0
-
-        # R相对大盘动量矩阵 (R20/60/120)
-        r_20  = float(rs_line.pct_change(20).iloc[-1] * 100) if len(rs_line) > 20 else 0
-        r_60  = float(rs_line.pct_change(60).iloc[-1] * 100) if len(rs_line) > 60 else 0
-        r_120 = float(rs_line.pct_change(120).iloc[-1] * 100) if len(rs_line) > 120 else 0
-
-        # From 2024-12-31 (YTD收益)
-        idx_2024 = close.index[close.index.normalize() <= pd.Timestamp('2024-12-31')]
-        if len(idx_2024) > 0:
-            p_2024 = float(close.loc[idx_2024[-1]])
-            ret_from_2024 = ((cp - p_2024) / p_2024) * 100
-        else:
-            ret_from_2024 = 0.0
-            
-        return {
-            "Rating": rating, "Action": " + ".join(signals) if signals else "震荡/无信号",
-            "Price": cp, "Tightness": tightness, "Score": score,
-            "is_bull": is_bull, "Ext50": ext_50, "RSRank": current_rs_rank,
-            "ADR": adr, "Vol_Ratio": vol_ratio,
-            "1D": ret_1d, "60D_Trend": trend_60d,
-            "REL5": rel_5, "REL20": rel_20, "REL60": rel_60, "REL120": rel_120,
-            "R20": r_20, "R60": r_60, "R120": r_120, "From_2024": ret_from_2024
-        }
-    except Exception as e:
-        return None
-
-# ==========================================
-# 极速获取市值与行业分类
-# ==========================================
-def get_meta_data(ticker_str):
-    try:
-        tk = yf.Ticker(ticker_str)
-        mcap = tk.fast_info.get("marketCap", 0) / 1e9
-        ind_en = tk.info.get("industry", "N/A")
-        ind_cn = INDUSTRY_MAP.get(ind_en, ind_en)  # 匹配中文，匹配不到则保留原英文
-        return mcap, ind_cn
-    except:
-        return 0.0, "N/A"
-
-# ==========================================
-# 🚀 3. 执行引擎 (多维矩阵极速版)
-# ==========================================
-def run_sentinel_commander():
-    start_t = time.time()
-    bj_now = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M')
-    print(f"🚀[{bj_now}] 启动 V1002 量子哨兵 [全息维度版]...")
-
-    try:
-        data = yf.download(CORE_TICKERS_HK, period="2y", progress=False, threads=False)
-        bench_raw = yf.download("^HSI", period="2y", progress=False, threads=False)
-        bench_series = bench_raw['Close'].squeeze()
-        if isinstance(bench_series, pd.DataFrame): bench_series = bench_series.iloc[:, 0]
-        hsi_vol = float(bench_series.pct_change().tail(20).std() * math.sqrt(252) * 100)
-    except Exception as e:
-        print(f"❌ 数据获取失败: {e}"); return
-
-    # 构建全局 RS Rank 矩阵
-    all_closes = data['Close'] if isinstance(data.columns, pd.MultiIndex) else pd.DataFrame(data['Close'], columns=CORE_TICKERS_HK)
-    all_closes = all_closes.ffill()
-
-    bench_aligned_global = bench_series.reindex(all_closes.index).ffill()
-    rs_matrix = all_closes.div(bench_aligned_global, axis=0).ffill()
-    rs_rank_matrix = rs_matrix.rank(axis=1, pct=True) * 100
-
-    candidates =[]
-    bull_count = 0
-    
-    for t in CORE_TICKERS_HK:
+def fetch_info_hk(t):
+    ticker = yf.Ticker(t)
+    for i in range(2):
         try:
-            if t not in all_closes.columns: continue
-            
-            df_t = pd.DataFrame({
-                'Close': data['Close'][t],
-                'High': data['High'][t],
-                'Low': data['Low'][t],
-                'Volume': data['Volume'][t]
-            }).dropna()
+            time.sleep(random.uniform(0.1, 0.2))
+            info = ticker.info
+            return t, {
+                'sector': str(info.get('sector', 'Unknown')),
+                'industry': str(info.get('industry', 'Unknown')),
+                'returnOnEquity': info.get('returnOnEquity', 0)
+            }
+        except: time.sleep(0.5)
+    return t, {}
 
-            rs_rank_series = rs_rank_matrix[t].dropna() if t in rs_rank_matrix.columns else pd.Series(dtype=float)
-            res = calculate_sentinel_metrics(df_t, bench_series, rs_rank_series)
-            
-            if res:
-                res["Ticker"] = t.replace(".HK", "")
-                
-                # 仅对入选池进行 Meta 查询以节省时间
-                if res["is_bull"]: bull_count += 1
-                
-                if (t in LEADER_WATCH) or (res["Score"] >= 0) or ("机构暗吸" in res["Rating"]):
-                    res["MktCap"], res["Industry"] = get_meta_data(t)
-                    candidates.append(res)
-        except Exception as e: 
-            continue
-
-    def sort_key(x):
-        is_leader = 1 if (x['Ticker'] + ".HK") in LEADER_WATCH else 0
-        is_holy = 1 if "圣杯" in x['Rating'] else 0
-        is_diverge = 1 if "暗吸" in x['Rating'] else 0
-        return (is_holy, is_diverge, is_leader, x['Score'])
-
-    candidates.sort(key=sort_key, reverse=True)
-    mkt_breadth = f"{round((bull_count / len(CORE_TICKERS_HK)) * 100, 1)}%"
+# ==========================================
+# 3. 核心量化模型 V113 (融合 RPS 動量評級 + RS Line + RSI)
+# ==========================================
+def run_super_growth_hk_v113():
+    update_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
+    universe = list(set(GURU_LIST_HK))
     
-    # 🚨 Header构建，确保前后列数完全一致（21列），兼容你要求的所有名称
-    matrix = [["🏰 V1002 超感矩阵版", f"大盘波动: {round(hsi_vol,1)}%", "多头广度:", mkt_breadth, "北京时间:", bj_now, "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],["Ticker", "Industry", "Score", "1D%", "60D Trend", "Action", "Resonance", "ADR", "Vol_Ratio", "Bias", "MktCap", "Rank", "REL5", "REL20", "REL60", "REL120", "R20", "R60", "R120", "Price", "From 2024-12-31"]
-    ]
+    print("\n" + "="*60)
+    print(f"🚀 [港股 動量矩陣 V113] 啟動 | 市場領導股策略 (RPS + RSI進場)")
 
-    # 严密格式化数据，彻底阻绝任何数值类型导致的 Google Sheets 显示溢出 BUG
-    for item in candidates[:30]:
+    print("⏳ 掃描個股及大盤基準指數(HSI)多維度數據...")
+    hist_all = yf.download(universe + [BENCHMARK_INDEX], period="2y", progress=False, threads=False)
+    close_df, vol_df = hist_all['Close'], hist_all['Volume']
+    high_df, low_df = hist_all['High'], hist_all['Low']
+    
+    # 獲取大盤數據用於計算 RS Line
+    hsi_close = close_df[BENCHMARK_INDEX].dropna() if BENCHMARK_INDEX in close_df else None
+    
+    tech_pool = {}
+    for t in universe:
+        if t not in close_df.columns or t not in vol_df.columns: continue
+        c, v, h, l = close_df[t].dropna(), vol_df[t].dropna(), high_df[t].dropna(), low_df[t].dropna()
+        if len(c) < 130: continue # 至少需要半年的數據來計算 120R
+        
+        p = float(c.iloc[-1])
+        m50 = float(c.tail(50).mean())
+        avg_vol_10 = float(v.tail(10).mean())
+        
+        # 基礎流動性與防線過濾
+        if p < 1.0 or (avg_vol_10 * p) < 10_000_000: continue 
+        if p < m50: continue 
+
+        # 🎯 1. 計算各週期的回報率 (對應文章中的 20R, 60R, 120R 週期)
+        ret_1m = get_ret(c, 21) * 100   # 1個月約 21 個交易日
+        ret_3m = get_ret(c, 63) * 100   # 3個月約 63 個交易日
+        ret_6m = get_ret(c, 126) * 100  # 6個月約 126 個交易日
+
+        # 🎯 2. 計算 RSI (用於輔助判斷進場點)
+        rsi_14 = float(calculate_rsi(c, 14).iloc[-1])
+        
+        # 🎯 3. 計算相對強度線 RS Line (個股相對於大盤的強度)
+        rs_trend_ok = False
+        if hsi_close is not None:
+            aligned_c, aligned_hsi = c.align(hsi_close, join='inner')
+            rs_line = aligned_c / aligned_hsi
+            rs_ma50 = rs_line.rolling(window=50).mean()
+            if len(rs_line) > 50:
+                # 文章條件：動量均線向上運行，且動量線高於均線
+                is_above_ma = rs_line.iloc[-1] > rs_ma50.iloc[-1]
+                is_ma_up = rs_ma50.iloc[-1] > rs_ma50.iloc[-10] 
+                rs_trend_ok = is_above_ma and is_ma_up
+
+        # 保留 VWAP 特徵作為回踩參考
+        typical_price = (h + l + c) / 3
+        vwap_20 = float((typical_price * v).tail(20).sum() / v.tail(20).sum())
+        dist_vwap = ((p - vwap_20) / vwap_20) * 100
+
+        tech_pool[t] = {
+            "P": p, "DistVWAP": dist_vwap,
+            "Ret_1M": ret_1m, "Ret_3M": ret_3m, "Ret_6M": ret_6m,
+            "RSI_14": rsi_14, "RS_Trend_OK": rs_trend_ok,
+            "Spark": ",".join([str(round(val, 2)) for val in c.tail(126).tolist()])
+        }
+
+    if not tech_pool: return print("⚠️ 查無符合標的。")
+
+    # 🎯 4. 計算 RPS 動量強度排名 (百分位排名 0-100)
+    rank_1m = (pd.Series({t: d['Ret_1M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
+    rank_3m = (pd.Series({t: d['Ret_3M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
+    rank_6m = (pd.Series({t: d['Ret_6M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
+
+    for t in tech_pool:
+        tech_pool[t]['20R'] = rank_1m.get(t, 0)
+        tech_pool[t]['60R'] = rank_3m.get(t, 0)
+        tech_pool[t]['120R'] = rank_6m.get(t, 0)
+        # 文章公式: Total Rank = 0.2*20R + 0.4*60R + 0.4*120R (降低短期噪音權重)
+        tech_pool[t]['Total_Rank'] = (0.2 * tech_pool[t]['20R']) + (0.4 * tech_pool[t]['60R']) + (0.4 * tech_pool[t]['120R'])
+
+    # 🎯 5. 領導股嚴格篩選：Total Rank 至少 > 75 (文章建議優選 > 80)
+    filtered_tech_pool = {t: d for t, d in tech_pool.items() if d['Total_Rank'] >= 75}
+
+    print(f"⏳ 拉取基本面 (共過濾出 {len(filtered_tech_pool)} 檔高動量領導股)...")
+    infos = {}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        for t, info in executor.map(fetch_info_hk, list(filtered_tech_pool.keys())):
+            if info: infos[t] = info
+
+    all_cands = []
+    for t, data in filtered_tech_pool.items():
+        info = infos.get(t, {})
+        sec, ind = info.get('sector'), info.get('industry')
+        
+        total_rank = data['Total_Rank']
+        rsi = data['RSI_14']
+        rs_ok = data['RS_Trend_OK']
+        
+        # 基礎評分即為其 RPS 總動量分數
+        strategy_score = total_rank 
+        
+        # 🎯 6. 制定進場點指令 (結合 RSI 與 RS Line)
+        action_tags = []
+        
+        # RS Line 動態檢查
+        if rs_ok:
+            action_tags.append("📈跑贏大盤(RS向上)")
+            strategy_score += 10
+        else:
+            action_tags.append("⚠️跑輸大盤(RS偏弱)")
+            strategy_score -= 10
+            
+        # RSI 輔助擇時
+        if rsi < 40:
+            action_tags.append(f"🟢RSI低吸({rsi:.0f})")
+            strategy_score += 15 # 高動量+低RSI = 最佳回調買點
+        elif 40 <= rsi <= 65:
+            action_tags.append(f"🟡RSI中性({rsi:.0f})")
+            strategy_score += 5
+        elif rsi > 70:
+            action_tags.append(f"🔴RSI超買({rsi:.0f})")
+            strategy_score -= 15 # 高動量+超買 = 容易短線見頂回調
+            
+        # 🎯 7. 風險控制：計算單筆頭寸 -8% 的嚴格止損價
+        price = data['P']
+        stop_loss_price = price * 0.92 
+        
+        raw_shares = TARGET_VALUE_PER_STOCK / price
+        target_shares = max(100, round(raw_shares / 100) * 100)
+
+        all_cands.append({
+            "Ticker": t, "Sector": sec, "Industry": ind[:10], 
+            "Score": strategy_score, "Action": " | ".join(action_tags), 
+            "Price": price, "StopLoss": stop_loss_price,
+            "TotalRank": total_rank, "R20": data['20R'], "R60": data['60R'], "R120": data['120R'],
+            "TargetShares": target_shares,
+            "Trend": f'=SPARKLINE({{{data["Spark"]}}}, {{"charttype","line";"color","black"}})'
+        })
+
+    all_cands.sort(key=lambda x: x['Score'], reverse=True)
+    top_10, sec_cnt = [], {}
+    for r in all_cands:
+        s = r['Sector']
+        if sec_cnt.get(s, 0) >= 3: continue # 避免單一行業過於集中
+        top_10.append(r)
+        sec_cnt[s] = sec_cnt.get(s, 0) + 1
+        if len(top_10) >= TARGET_POSITIONS: break
+    
+    # 輸出矩陣：採用全新的分析維度
+    headers_col = ["Ticker", "Industry", "Last Price", "半年走勢圖", "RPS總排名(>80優)", "RPS結構(20/60/120)", "策略與進場點 (RSI)", "無條件止損價(-8%)", "綜合評分", "應持有股數", "更新時間"]
+    
+    matrix = [[f"Momentum Portfolio V113 (市場領導股策略)", f"{update_time}", ""] + [""] * 8, headers_col]
+    
+    for i, r in enumerate(top_10):
+        # 凸顯高分領導股
+        rank_str = f"{r['TotalRank']:.1f} 🔥" if r['TotalRank'] >= 80 else f"{r['TotalRank']:.1f}"
+        struct_str = f"{int(r['R20'])} / {int(r['R60'])} / {int(r['R120'])}"
+
         matrix.append([
-            item["Ticker"],
-            item["Industry"],
-            f'{item["Score"]}',                    
-            f'{item["1D"]:.2f}%',                  
-            item["60D_Trend"],                     
-            item["Action"],                        
-            item["Rating"],                        # 对应 Resonance
-            f'{item["ADR"]:.2f}%',                 
-            f'{item["Vol_Ratio"]:.2f}',            
-            f'{item["Ext50"]:.2f}%',               # 对应 Bias
-            f'{item["MktCap"]:.1f}B',              
-            f'{int(item["RSRank"])}',              # 对应 Rank(1-100)
-            f'{item["REL5"]:.2f}%',                
-            f'{item["REL20"]:.2f}%',               
-            f'{item["REL60"]:.2f}%',               
-            f'{item["REL120"]:.2f}%',              
-            f'{item["R20"]:.2f}%',                 
-            f'{item["R60"]:.2f}%',                 
-            f'{item["R120"]:.2f}%',                
-            f'{item["Price"]:.2f}',                
-            f'{item["From_2024"]:.2f}%'            # 对应 From 2024-12-31
+            f"👑 {r['Ticker']}" if i < 3 else r['Ticker'], r['Industry'], 
+            f"{round(r['Price'], 2)}", r['Trend'], 
+            rank_str, struct_str, r['Action'], 
+            f"${round(r['StopLoss'], 2)}",
+            f"{round(r['Score'], 1)}", r['TargetShares'], update_time
         ])
 
-    try:
-        resp = requests.post(WEBAPP_URL, json=matrix, timeout=25)
-        print(f"🎉 V1002 全息矩阵同步成功！用时: {round(time.time() - start_t, 2)}秒 | 推送数据维度: 21 列")
-    except Exception as e:
-        print(f"❌ 网络同步失败: {e}")
+    print("📤 推送 V113 動量矩陣至 Google Sheets...")
+    response = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
+    
+    if response.status_code == 200: print("✅ V113 數據推送成功！")
+    else: print(f"❌ 推送失敗，狀態碼: {response.status_code}")
 
 if __name__ == "__main__":
-    run_sentinel_commander()
+    run_super_growth_hk_v113()
