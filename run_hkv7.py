@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 # 1. 系統配置中心 (V113 市場領導股・動量矩陣版)
 # ==========================================
 # 更新為指定的 Web App URL
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwfstK4Xq1DXft4U3_Qg9pjCQ5Qp0FiIskzrKnT1VFdRiH5FFyk6Iikv0FAcZNrPtp-/exec"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1fIw-8zcKpj8ALoSYszw8dG9SXsps63nXHnwRDOT2vWoXP6hf58t4XIkWnWvN4iUj/exec"
 # 更新為指定的 Google Sheet 分頁名稱
 TARGET_SHEET = "HKv7-Share Screener"
 
@@ -233,8 +233,10 @@ def run_super_growth_hk_v113():
     print("📤 推送 V113 動量矩陣至 Google Sheets...")
     response = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     
-    if response.status_code == 200: print("✅ V113 數據推送成功！")
-    else: print(f"❌ 推送失敗，狀態碼: {response.status_code}")
+    if response.status_code == 200: 
+        print(f"✅ V113 數據推送請求成功！Google 回傳訊息: {response.text}")
+    else: 
+        print(f"❌ 推送失敗，狀態碼: {response.status_code}, 錯誤訊息: {response.text}")
 
 if __name__ == "__main__":
     run_super_growth_hk_v113()
