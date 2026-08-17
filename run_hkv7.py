@@ -11,9 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 系統配置中心 (V113 市場領導股・動量矩陣版)
+# 1. 系統配置中心 (V114 終極動量形態版 - 戰略+戰術融合)
 # ==========================================
-# 已經更新為您最新提供的 Web App URL
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1fIw-8zcKpj8ALoSYszw8dG9SXsps63nXHnwRDOT2vWoXP6hf58t4XIkWnWvN4iUj/exec"
 TARGET_SHEET = "HKv7-Share Screener"
 
@@ -21,7 +20,7 @@ PORTFOLIO_CAPITAL = 1_000_000
 TARGET_POSITIONS = 10
 AVAILABLE_CAPITAL = PORTFOLIO_CAPITAL * 0.95 
 TARGET_VALUE_PER_STOCK = AVAILABLE_CAPITAL / TARGET_POSITIONS 
-BENCHMARK_INDEX = "^HSI" # 引入恆生指數作為計算 RS Line 的大盤基準
+BENCHMARK_INDEX = "^HSI" 
 
 GURU_LIST_HK = [
     "0700.HK", "9988.HK", "3690.HK", "1810.HK", "1211.HK", "2015.HK", "9868.HK", "9866.HK", 
@@ -48,8 +47,7 @@ def calculate_rsi(series, period=14):
     ema_up = up.ewm(com=period-1, adjust=False).mean()
     ema_down = down.ewm(com=period-1, adjust=False).mean()
     rs = ema_up / ema_down
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 def fetch_info_hk(t):
     ticker = yf.Ticker(t)
@@ -60,73 +58,76 @@ def fetch_info_hk(t):
             return t, {
                 'sector': str(info.get('sector', 'Unknown')),
                 'industry': str(info.get('industry', 'Unknown')),
-                'returnOnEquity': info.get('returnOnEquity', 0)
+                'returnOnEquity': info.get('returnOnEquity', 0),
+                'revenueGrowth': info.get('revenueGrowth', 0)
             }
         except: time.sleep(0.5)
     return t, {}
 
 # ==========================================
-# 3. 核心量化模型 V113 (融合 RPS 動量評級 + RS Line + RSI)
+# 3. 核心量化模型 V114
 # ==========================================
-def run_super_growth_hk_v113():
+def run_super_growth_hk_v114():
     update_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
     universe = list(set(GURU_LIST_HK))
     
     print("\n" + "="*60)
-    print(f"🚀 [港股 動量矩陣 V113] 啟動 | 市場領導股策略 (RPS + RSI進場)")
+    print(f"🚀 [港股 動量矩陣 V114] 終極版啟動 | (RPS領導股 + VWAP/形態狙擊點)")
 
-    print("⏳ 掃描個股及大盤基準指數(HSI)多維度數據...")
+    print("⏳ 掃描量價、大盤(HSI)與籌碼形態(VWAP)...")
     hist_all = yf.download(universe + [BENCHMARK_INDEX], period="2y", progress=False, threads=False)
     close_df, vol_df = hist_all['Close'], hist_all['Volume']
     high_df, low_df = hist_all['High'], hist_all['Low']
     
-    # 獲取大盤數據用於計算 RS Line
     hsi_close = close_df[BENCHMARK_INDEX].dropna() if BENCHMARK_INDEX in close_df else None
     
     tech_pool = {}
     for t in universe:
         if t not in close_df.columns or t not in vol_df.columns: continue
         c, v, h, l = close_df[t].dropna(), vol_df[t].dropna(), high_df[t].dropna(), low_df[t].dropna()
-        if len(c) < 130: continue # 至少需要半年的數據來計算 120R
+        if len(c) < 130: continue 
         
         p = float(c.iloc[-1])
         m50 = float(c.tail(50).mean())
         avg_vol_10 = float(v.tail(10).mean())
+        if p < 1.0 or (avg_vol_10 * p) < 10_000_000 or p < m50: continue 
+
+        # 1. 計算 V113 的動量回報率 (20R/60R/120R 基礎)
+        ret_1m = get_ret(c, 21) * 100
+        ret_3m = get_ret(c, 63) * 100
+        ret_6m = get_ret(c, 126) * 100
+
+        # 2. 計算 V112 的形態學與籌碼指標 (紅黑線、VWAP、量比)
+        red_line_h20 = float(h.shift(1).tail(20).max())
+        black_line_h60 = float(h.shift(1).tail(60).max())
+        typical_price = (h + l + c) / 3
+        vwap_20 = float((typical_price * v).tail(20).sum() / v.tail(20).sum())
         
-        # 基礎流動性與防線過濾
-        if p < 1.0 or (avg_vol_10 * p) < 10_000_000: continue 
-        if p < m50: continue 
+        dist_vwap = ((p - vwap_20) / vwap_20) * 100
+        dist_red = ((p - red_line_h20) / red_line_h20) * 100
+        dist_black = ((p - black_line_h60) / black_line_h60) * 100
+        vr = float(v.iloc[-1]) / float(v.tail(50).mean()) if float(v.tail(50).mean()) > 0 else 1.0
 
-        # 🎯 1. 計算各週期的回報率 (對應文章中的 20R, 60R, 120R 週期)
-        ret_1m = get_ret(c, 21) * 100   # 1個月約 21 個交易日
-        ret_3m = get_ret(c, 63) * 100   # 3個月約 63 個交易日
-        ret_6m = get_ret(c, 126) * 100  # 6個月約 126 個交易日
-
-        # 🎯 2. 計算 RSI (用於輔助判斷進場點)
+        # 3. 計算 V113 的大盤強度 (RS Line) 與 RSI
         rsi_14 = float(calculate_rsi(c, 14).iloc[-1])
-        
-        # 🎯 3. 計算相對強度線 RS Line (個股相對於大盤的強度)
         rs_trend_ok = False
         if hsi_close is not None:
             aligned_c, aligned_hsi = c.align(hsi_close, join='inner')
             rs_line = aligned_c / aligned_hsi
             rs_ma50 = rs_line.rolling(window=50).mean()
             if len(rs_line) > 50:
-                # 文章條件：動量均線向上運行，且動量線高於均線
-                is_above_ma = rs_line.iloc[-1] > rs_ma50.iloc[-1]
-                is_ma_up = rs_ma50.iloc[-1] > rs_ma50.iloc[-10] 
-                rs_trend_ok = is_above_ma and is_ma_up
+                rs_trend_ok = (rs_line.iloc[-1] > rs_ma50.iloc[-1]) and (rs_ma50.iloc[-1] > rs_ma50.iloc[-10])
 
         tech_pool[t] = {
-            "P": p, 
+            "P": p, "VR": vr, "RSI_14": rsi_14, "RS_Trend_OK": rs_trend_ok,
+            "VWAP20": vwap_20, "DistVWAP": dist_vwap, "DistRed": dist_red, "DistBlack": dist_black,
             "Ret_1M": ret_1m, "Ret_3M": ret_3m, "Ret_6M": ret_6m,
-            "RSI_14": rsi_14, "RS_Trend_OK": rs_trend_ok,
             "Spark": ",".join([str(round(val, 2)) for val in c.tail(126).tolist()])
         }
 
     if not tech_pool: return print("⚠️ 查無符合標的。")
 
-    # 🎯 4. 計算 RPS 動量強度排名 (百分位排名 0-100)
+    # 4. 計算 RPS 動量強度排名 (V113 戰略核心)
     rank_1m = (pd.Series({t: d['Ret_1M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
     rank_3m = (pd.Series({t: d['Ret_3M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
     rank_6m = (pd.Series({t: d['Ret_6M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
@@ -135,13 +136,12 @@ def run_super_growth_hk_v113():
         tech_pool[t]['20R'] = rank_1m.get(t, 0)
         tech_pool[t]['60R'] = rank_3m.get(t, 0)
         tech_pool[t]['120R'] = rank_6m.get(t, 0)
-        # 文章公式: Total Rank = 0.2*20R + 0.4*60R + 0.4*120R (降低短期噪音權重)
         tech_pool[t]['Total_Rank'] = (0.2 * tech_pool[t]['20R']) + (0.4 * tech_pool[t]['60R']) + (0.4 * tech_pool[t]['120R'])
 
-    # 🎯 5. 領導股嚴格篩選：Total Rank 至少 > 75 (文章建議優選 > 80)
+    # 🛑 戰略過濾：嚴格要求 RPS 總分 >= 75，只做市場領導股
     filtered_tech_pool = {t: d for t, d in tech_pool.items() if d['Total_Rank'] >= 75}
 
-    print(f"⏳ 拉取基本面 (共過濾出 {len(filtered_tech_pool)} 檔高動量領導股)...")
+    print(f"⏳ 拉取基本面 (過濾出 {len(filtered_tech_pool)} 檔市場領導股)...")
     infos = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
         for t, info in executor.map(fetch_info_hk, list(filtered_tech_pool.keys())):
@@ -152,46 +152,56 @@ def run_super_growth_hk_v113():
         info = infos.get(t, {})
         sec, ind = info.get('sector'), info.get('industry')
         
+        # V112 延伸：領導股加上業績雙驅動會有額外加分
+        roe = (info.get('returnOnEquity') or 0) * 100
+        rev_growth = (info.get('revenueGrowth') or 0) * 100
+        fund_bonus = (10 if roe > 15 else 0) + (10 if rev_growth > 20 else 0)
+
         total_rank = data['Total_Rank']
         rsi = data['RSI_14']
-        rs_ok = data['RS_Trend_OK']
+        dist_vwap, dist_red, dist_black, vr = data['DistVWAP'], data['DistRed'], data['DistBlack'], data['VR']
         
-        # 基礎評分即為其 RPS 總動量分數
-        strategy_score = total_rank 
+        strategy_score = total_rank + fund_bonus
         
-        # 🎯 6. 制定進場點指令 (結合 RSI 與 RS Line)
-        action_tags = []
+        # 🎯 終極戰術分析：結合大盤趨勢、VWAP籌碼與形態學
+        rs_tag = "📈跑贏大盤" if data['RS_Trend_OK'] else "⚠️大盤偏弱"
         
-        # RS Line 動態檢查
-        if rs_ok:
-            action_tags.append("📈跑贏大盤(RS向上)")
+        action_tag = ""
+        # 情況 A：跌破主力防線
+        if dist_vwap < -3.0: 
+            action_tag = f"✂️跌破籌碼線(VWAP{dist_vwap:+.1f}%)"
+            strategy_score -= 20
+        # 情況 B：大戰略突破 (過60日前高且放量)
+        elif dist_black > 0 and vr > 1.2:
+            action_tag = "🚀大底突破(放量)"
+            strategy_score += 15
+        # 情況 C：短線突破 (過20日頸線且放量)
+        elif dist_red > 0 and vr > 1.2:
+            action_tag = "🔥短線突破(放量)"
             strategy_score += 10
+        # 情況 D：完美回踩 (靠近VWAP、量縮、RSI未超買) -- 最佳盈虧比買點！
+        elif 0 <= dist_vwap <= 4.0 and vr < 0.8 and rsi < 60:
+            action_tag = "🎯完美回踩VWAP(量縮低吸)"
+            strategy_score += 20 
+        # 情況 E：過熱警報
+        elif dist_vwap > 8.0 or rsi > 70: 
+            action_tag = f"🔴過熱勿追(RSI:{rsi:.0f}/VWAP{dist_vwap:+.1f}%)"
+            strategy_score -= 15
         else:
-            action_tags.append("⚠️跑輸大盤(RS偏弱)")
-            strategy_score -= 10
-            
-        # RSI 輔助擇時
-        if rsi < 40:
-            action_tags.append(f"🟢RSI低吸({rsi:.0f})")
-            strategy_score += 15 # 高動量+低RSI = 最佳回調買點
-        elif 40 <= rsi <= 65:
-            action_tags.append(f"🟡RSI中性({rsi:.0f})")
-            strategy_score += 5
-        elif rsi > 70:
-            action_tags.append(f"🔴RSI超買({rsi:.0f})")
-            strategy_score -= 15 # 高動量+超買 = 容易短線見頂回調
-            
-        # 🎯 7. 風險控制：計算單筆頭寸 -8% 的嚴格止損價
-        price = data['P']
-        stop_loss_price = price * 0.92 
+            action_tag = f"🛡️均線震盪(RSI:{rsi:.0f})"
+
+        # 結合 RS 狀態與個股戰術
+        final_action = f"{rs_tag} | {action_tag}"
         
-        raw_shares = TARGET_VALUE_PER_STOCK / price
-        target_shares = max(100, round(raw_shares / 100) * 100)
+        # V113 鐵律：無條件 -8% 止損
+        price = data['P']
+        stop_loss = price * 0.92 
+        target_shares = max(100, round((TARGET_VALUE_PER_STOCK / price) / 100) * 100)
 
         all_cands.append({
             "Ticker": t, "Sector": sec, "Industry": ind[:10], 
-            "Score": strategy_score, "Action": " | ".join(action_tags), 
-            "Price": price, "StopLoss": stop_loss_price,
+            "Score": strategy_score, "Action": final_action, 
+            "Price": price, "StopLoss": stop_loss,
             "TotalRank": total_rank, "R20": data['20R'], "R60": data['60R'], "R120": data['120R'],
             "TargetShares": target_shares,
             "Trend": f'=SPARKLINE({{{data["Spark"]}}}, {{"charttype","line";"color","black"}})'
@@ -206,13 +216,11 @@ def run_super_growth_hk_v113():
         sec_cnt[s] = sec_cnt.get(s, 0) + 1
         if len(top_10) >= TARGET_POSITIONS: break
     
-    # 輸出矩陣：採用全新的分析維度
-    headers_col = ["Ticker", "Industry", "Last Price", "半年走勢圖", "RPS總排名(>80優)", "RPS結構(20/60/120)", "策略與進場點 (RSI)", "無條件止損價(-8%)", "綜合評分", "應持有股數", "更新時間"]
-    
-    matrix = [[f"Momentum Portfolio V113 (市場領導股策略)", f"{update_time}", ""] + [""] * 8, headers_col]
+    # 輸出矩陣設計 (更緊湊、專業的欄位)
+    headers_col = ["Ticker", "Industry", "Last Price", "半年走勢", "RPS領導排名", "動量結構(20/60/120)", "戰術指令 (大盤狀態 | 籌碼與形態)", "鐵血止損價", "綜合評分", "建議股數", "更新時間"]
+    matrix = [[f"Momentum Portfolio V114 (戰略領導股 + 戰術狙擊點)", f"{update_time}", ""] + [""] * 8, headers_col]
     
     for i, r in enumerate(top_10):
-        # 凸顯高分領導股
         rank_str = f"{r['TotalRank']:.1f} 🔥" if r['TotalRank'] >= 80 else f"{r['TotalRank']:.1f}"
         struct_str = f"{int(r['R20'])} / {int(r['R60'])} / {int(r['R120'])}"
 
@@ -224,13 +232,13 @@ def run_super_growth_hk_v113():
             f"{round(r['Score'], 1)}", r['TargetShares'], update_time
         ])
 
-    print("📤 推送 V113 動量矩陣至 Google Sheets...")
+    print("📤 推送 V114 終極矩陣至 Google Sheets...")
     response = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     
     if response.status_code == 200: 
-        print(f"✅ V113 數據推送請求成功！Google 回傳: {response.text}")
+        print(f"✅ V114 數據推送成功！Google 回傳: {response.text}")
     else: 
         print(f"❌ 推送失敗，狀態碼: {response.status_code}, 錯誤訊息: {response.text}")
 
 if __name__ == "__main__":
-    run_super_growth_hk_v113()
+    run_super_growth_hk_v114()
