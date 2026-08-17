@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # =====================================================================
-# 1. 系統配置中心
+# 1. 系統配置中心 (已綁定專屬 Web App 與 工作表)
 # =====================================================================
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxtNb3Wb6gsabX3B0rYf3Ws_xnRetjqEum3j2sfFjW-PdttgTNdV0qC1gK3Jkicme6_/exec"
 TARGET_SHEET = "us Screener"
@@ -77,20 +77,20 @@ def sync_to_google_sheet(sheet_name, matrix):
         res = requests.post(WEBAPP_URL, json=payload, timeout=60)
         print(f"📥 伺服器狀態碼: {res.status_code}")
         if res.status_code == 200:
-            print(f"🎉 恭喜！V106 雙軌先勝決策版 已成功同步至 [{sheet_name}]！")
+            print(f"🎉 恭喜！V107 大師先勝獵殺版 已成功同步至 [{sheet_name}]！")
     except Exception as e: 
         print(f"❌ 同步失敗: {e}")
 
 # =====================================================================
-# 3. 核心量化模型 V106 (Dual-Track Sun Tzu Sniper)
+# 3. 核心量化模型 V107 (Master Sun Tzu Momentum Engine)
 # =====================================================================
-def run_dual_track_sniper_v106():
+def run_master_sun_tzu_v107():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     if "QQQ" not in universe: universe.append("QQQ")
     
     print("\n" + "="*60)
-    print(f"⚔️ [雙軌先勝量化系統 V106] 啟動 | 股票池: {len(universe)}")
+    print(f"⚔️ [大師先勝獵殺量化系統 V107] 啟動 | 股票池: {len(universe)}")
 
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df, vol_df, high_df, low_df = hist_all['Close'], hist_all['Volume'], hist_all['High'], hist_all['Low']
@@ -122,7 +122,7 @@ def run_dual_track_sniper_v106():
             p, p_prev = float(c.iloc[-1]), float(c.iloc[-2])
             ema20 = float(c.ewm(span=20, adjust=False).mean().iloc[-1])
             
-            # (A) RPS 多週期加權評分
+            # (A) RPS 多週期評分
             r20, r60, r120 = r20_rank.get(t, 50), r60_rank.get(t, 50), r120_rank.get(t, 50)
             total_rank = round((0.2 * r20) + (0.4 * r60) + (0.4 * r120), 1)
 
@@ -140,7 +140,7 @@ def run_dual_track_sniper_v106():
             vwma60 = (cv.rolling(60).sum() / v.rolling(60).sum()).iloc[-1]
             p_above_vwma = p > vwma20 and p > vwma60
 
-            # (D) 微觀突破與 VCP 收斂
+            # (D) 微觀結構
             black_line = float(c.tail(60).max())
             red_line = float(c.iloc[-11:-1].max())
             is_breakout = p >= black_line * 0.985
@@ -171,13 +171,13 @@ def run_dual_track_sniper_v106():
         except Exception:
             continue
 
-    # 基本面
+    # 基本面抓取
     infos = {}
     with ThreadPoolExecutor(max_workers=6) as executor:
         for t, info in executor.map(fetch_info, list(stock_analysis.keys())):
             if info: infos[t] = info
 
-    # 5. 雙軌「先勝後戰」決策邏輯
+    # 5. 大師級「先勝後戰」決策邏輯 (注入 ATI 彈簧 與 HPE 突破基因)
     candidates = []
     for t, data in stock_analysis.items():
         if t not in infos: continue
@@ -192,68 +192,76 @@ def run_dual_track_sniper_v106():
         if not is_master and any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
 
         tr = data['TotalRank']
+        r20 = data['20R']
+        r60 = data['60R']
+        r120 = data['120R']
         rsi = data['RSI']
         dist = data['Dist20']
         dist_fmt = f"{dist:+.1f}%"
 
-        # 標籤
-        tags = []
-        if data['IsBreakout']: tags.append("🚀真空突破")
-        elif data['IsRedBreak']: tags.append("⚡紅線突破")
-        elif data['VWMA_Up']: tags.append("📈籌碼多頭")
+        # 🎯 大神專屬模式識別
+        # 模式一：ATI 經典黃金彈簧 (中長極強 + 短期洗盤完畢 + 貼線)
+        is_springboard = (r120 >= 90.0 and r60 >= 85.0 and 20.0 <= r20 <= 60.0 and 42.0 <= rsi <= 62.0 and -3.0 <= dist <= 2.5)
         
-        if data['RS_Strong']: tags.append("🔥RS強")
-        if data['IsVCP']: tags.append("🎯VCP收斂")
+        # 模式二：HPE 經典全動量放量突破
+        is_hpe_breakout = (r120 >= 88.0 and r60 >= 88.0 and r20 >= 75.0 and data['IsBreakout'] and data['VolRatio'] > 1.15 and rsi <= 73.0)
+
+        # 結構標籤
+        tags = []
+        if is_springboard: tags.append("🔥黃金彈簧")
+        elif is_hpe_breakout: tags.append("🚀全週期突破")
+        elif data['IsBreakout']: tags.append("真空突破")
+        elif data['IsRedBreak']: tags.append("紅線突破")
+        
+        if data['VWMA_Up']: tags.append("籌碼多頭")
+        if data['RS_Strong']: tags.append("RS強")
+        if data['IsVCP']: tags.append("VCP收斂")
         if data['VolRatio'] > 1.25: tags.append("爆量")
         
-        if rsi >= 75: tags.append("⚠️極度過熱")
-        elif 42 <= rsi <= 62: tags.append("黃金買區")
-        elif rsi < 35: tags.append("超賣底背離")
+        if rsi >= 74: tags.append("⚠️過熱")
+        elif 42 <= rsi <= 60: tags.append("買區")
         msg_str = "|".join(tags) if tags else "穩健"
 
-        # ⚔️ 雙軌先勝指令判斷
+        # ⚔️ 嚴格決策指令
         if is_master:
             if dist < -8.0:
-                action = f"🛡️破止損線({dist_fmt})"
-            elif tr < 70:
-                action = f"⚠️動量衰竭({dist_fmt})"
-            elif -2.5 <= dist <= 2.0 and 42 <= rsi <= 62:
+                action = f"🛡️觸發硬止損({dist_fmt})"
+            elif tr < 70 or r120 < 75:
+                action = f"⚠️動量衰竭(換股)({dist_fmt})"
+            elif is_springboard or (-2.5 <= dist <= 2.0 and 42 <= rsi <= 60):
                 action = f"🎯安全加倉({dist_fmt})"
-            elif rsi >= 75 or dist > 8.0:
-                action = f"👀過熱持倉({dist_fmt})"
+            elif rsi >= 74 or dist > 8.0:
+                action = f"👑過熱持倉({dist_fmt})"
             else:
                 action = f"👑標準持倉({dist_fmt})"
         else:
-            # 1. 淘汰弱勢
-            if tr < 75 or not data['RS_Strong']:
+            # 1. 淘汰弱勢（大格局不強者堅決不碰）
+            if tr < 75 or r120 < 80 or not data['RS_Strong']:
                 action = f"⚠️淘汰弱勢({dist_fmt})"
             
-            # 2. 真實過熱禁追 (RSI ≥ 74 或 乖離超過 +8.5%)
+            # 2. 嚴禁追高（防護盾）
             elif rsi >= 74 or dist > 8.5:
                 action = f"👀過熱禁追({dist_fmt})"
             
-            # 3. 🎯 雙軌狙擊點 (Total Rank ≥ 80 且 RS向上)
+            # 3. 🎯 大師級先勝開火信號
+            elif is_springboard:
+                action = f"🎯彈簧狙擊({dist_fmt})"  # 最具暴利潛力的買點！
+            elif is_hpe_breakout:
+                action = f"🎯突破狙擊({dist_fmt})"  # 最強加速主升浪！
+            elif tr >= 80 and (-2.5 <= dist <= 2.5 and 42 <= rsi <= 60) and (data['IsVCP'] or data['VWMA_Up']):
+                action = f"🎯回踩狙擊({dist_fmt})"
             elif tr >= 80 and data['RS_Strong']:
-                # 軌道 A：突破狙擊 (剛突破 + RSI 55~73 + 乖離在 2%~8% 正常突破區)
-                if (data['IsBreakout'] or data['IsRedBreak']) and 55 <= rsi <= 73 and dist <= 8.0:
-                    action = f"🎯突破狙擊({dist_fmt})"
-                
-                # 軌道 B：回踩狙擊 (回踩 20 均線 -2.5%~+3.0% + RSI 42~62 + VCP 或 VWMA 籌碼支撐)
-                elif -2.5 <= dist <= 3.0 and 42 <= rsi <= 62 and (data['IsVCP'] or data['VWMA_Up']):
-                    action = f"🎯回踩狙擊({dist_fmt})"
-                
-                # 軌道 C：處於強勢推進階段但無極佳買點
-                else:
-                    action = f"🔍強勢觀察({dist_fmt})"
+                action = f"🔍強勢觀察({dist_fmt})"
             else:
                 action = f"🔍蓄勢待發({dist_fmt})"
 
-        # 評分系統
+        # 評分系統 (彈簧形態與全週期突破給予最高優先權)
         final_score = tr
+        if is_springboard: final_score += 8   # 彈簧暴擊加分
+        if is_hpe_breakout: final_score += 7  # 突破加速加分
         if data['RS_Strong']: final_score += 4
         if data['VWMA_Up']: final_score += 3
-        if "🎯" in action: final_score += 6  # 出現精確買點加暴擊分
-        if rsi >= 75: final_score -= 8
+        if rsi >= 74: final_score -= 8
         if dist < -8.0: final_score *= 0.5
         if is_master: final_score += 1000
 
@@ -280,14 +288,14 @@ def run_dual_track_sniper_v106():
 
     # 6. 組裝輸出矩陣
     headers = [
-        "排名", "代碼", "名稱/行業", "作戰指令(雙軌先勝)", "Msg結構標籤", 
+        "排名", "代碼", "名稱/行業", "作戰指令(大師先勝)", "Msg結構標籤", 
         "Total Rank", "20R(1M)", "60R(3M)", "120R(6M)", "RSI(14)", 
         "RS/QQQ動量", "60日走勢(圖)", "現價", "1D%", "今年YTD", 
         "市值(Bil)", "量比", "ADR%", "風控倉位", "硬止損價(-8%)", "綜合評分", "更新時間"
     ]
 
-    title_info = f"⚔️ 雙軌先勝決策系統 V106 | 分流【突破狙擊】與【回踩狙擊】 | 嚴禁 RSI≥74 追高 | 嚴守 -8% 止損"
-    matrix = [[f"Dual-Track Sun Tzu Master V106", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
+    title_info = f"⚔️ 大師先勝獵殺系統 V107 | 裝載【ATI黃金彈簧】與【HPE突破加速】基因 | 嚴禁 RSI≥74 追高 | 嚴守 -8% 止損"
+    matrix = [[f"Master Sun Tzu Momentum V107", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
 
     for i, r in enumerate(top_leaders):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
@@ -306,4 +314,4 @@ def run_dual_track_sniper_v106():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_dual_track_sniper_v106()
+    run_master_sun_tzu_v107()
