@@ -12,15 +12,15 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 系統配置中心 (已綁定您最新通過測試的 Web App URL)
+# 1. 系統配置中心 (已鎖定最新 Web App 網址)
 # ==========================================
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbz-sv8TCkC9lDMKvBInu6KGeS0P-OOxnlOLNkC-f3p6iHwIDGFBiDC6sN-eZZR_Nm3c/exec"
 TARGET_SHEET = "A_Super" 
 PORTFOLIO_CAPITAL = 1000000  
 TARGET_POSITIONS = 10  
 
-# 🚀 V190 核心股票池：涵蓋 AI硬體/半導體/防禦/週期
-GURU_LIST_A =[
+# 🚀 V190 股票池
+GURU_LIST_A = [
     # 存儲/半導體/AI晶片 (對標 MU 美光)
     "603986.SS", "301308.SZ", "688525.SS", "688041.SS", "688256.SS", "002049.SZ",
     # AI伺服器與硬體 (對標 SOXX)
@@ -31,7 +31,8 @@ GURU_LIST_A =[
     "603259.SS", "600276.SS", "601888.SS", "300759.SZ"
 ]
 
-def get_universe_a(): return list(set(GURU_LIST_A))
+def get_universe_a(): 
+    return list(set(GURU_LIST_A))
 
 def fetch_info_a(t):
     ticker = yf.Ticker(t)
@@ -41,17 +42,18 @@ def fetch_info_a(t):
             info = ticker.info
             if info and 'industry' in info:
                 return t, str(info.get('sector', 'Unknown'))
-        except: time.sleep(0.3)
+        except: 
+            time.sleep(0.3)
     return t, 'Unknown'
 
 # ==========================================
-# 2. 核心量化模型 V190 (VWAP + 紅黑線 雙引擎)
+# 2. 核心量化模型 V190
 # ==========================================
 def run_super_growth_a():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe_a()
     print("\n" + "="*65)
-    print(f"🎯 [A股 V190 終極版] 啟動 | 載入「MU式 VWAP雙線突破」與「SOXX 先勝後戰」引擎...")
+    print(f"🎯 [A股 V190 終極版] 啟動 | 當前目標URL: {WEBAPP_URL[:45]}...")
 
     hist_all = yf.download(universe, period="1y", progress=False, threads=False)
     if hist_all.empty: 
@@ -71,7 +73,6 @@ def run_super_growth_a():
             p = float(c.iloc[-1])
             if len(c) < 100 or p < 1.0: continue
             
-            # 📊 引擎 1：計算 VWAP 加權均線 (紅) 與 全換手均線擬合 (藍)
             typical_price = c
             vwap_20_red = (typical_price * v).rolling(window=20).sum() / v.rolling(window=20).sum()
             vwap_60_blue = (typical_price * v).rolling(window=60).sum() / v.rolling(window=60).sum()
@@ -79,11 +80,9 @@ def run_super_growth_a():
             v_red = float(vwap_20_red.iloc[-1])
             v_blue = float(vwap_60_blue.iloc[-1])
             
-            # 📊 引擎 2：計算宏觀黑線 (前高防線) 與 紅線 (局部頸線)
             black_line = float(h.shift(3).rolling(window=60).max().iloc[-1])
             red_line = float(h.shift(3).rolling(window=20).max().iloc[-1])
             
-            # 判斷近三天內是否剛從 VWAP 均線下方突破上來 (抓紅箭頭)
             was_below = float(c.iloc[-4]) < float(vwap_20_red.iloc[-4]) or float(c.iloc[-4]) < float(vwap_60_blue.iloc[-4])
             is_above_now = p > v_red and p > v_blue
             
@@ -110,10 +109,8 @@ def run_super_growth_a():
         p = data['P']
         v_red, v_blue = data['VWAP_Red'], data['VWAP_Blue']
         black = data['BlackLine']
-        
         score = rs
         
-        # 🎯 V190 雙核大師決策樹
         if data['IsAboveNow'] and data['WasBelow'] and rs > 60:
             action = "🔥 MU式雙線突破"
             msg = "剛剛放量站上 VWAP 與全換手均線，套牢盤清空，主升段點火！"
@@ -141,7 +138,6 @@ def run_super_growth_a():
             "VWAP_Red": v_red, "VWAP_Blue": v_blue, "BlackLine": black
         })
 
-    # 精選 Top 10
     all_cands.sort(key=lambda x: x['Score'], reverse=True)
     top_10 = all_cands[:TARGET_POSITIONS]
 
@@ -156,7 +152,6 @@ def run_super_growth_a():
     
     for i, r in enumerate(top_10):
         shares = math.floor(allocation_per_stock / (r['Price'] * 100)) * 100
-        
         matrix.append([
             f"T{i+1}", f"👑 {r['Ticker']}", r['Action'], r['Msg'], 
             f"{round(r['RS'], 1)}", f"¥{round(r['Price'], 2)}", 
@@ -164,15 +159,13 @@ def run_super_growth_a():
             f"¥{round(r['BlackLine'], 2)}", f"{shares:,} 股", update_time
         ])
 
-    print(f"📤 正在推送 V190 全籌碼突破陣型至 Google Sheets...")
+    print(f"📤 準備推送 {len(matrix)} 行數據至 [{TARGET_SHEET}] 分頁...")
     res = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
-    print("後台回傳狀態碼:", res.status_code)
-    print("後台回傳內容:", res.text)
+    print("後台 HTTP 狀態碼:", res.status_code)
+    print("後台完整回應:", res.text)
     
     if res.status_code == 200:
-        print("\n✅ V190 數據已成功寫入 Google Sheets！請切換到試算表檢視最新的狙擊陣型！")
-    else:
-        print(f"\n❌ 推送失敗，狀態碼: {res.status_code}")
+        print("\n✅ 推送成功！請刷新 Google Sheets 檢視。")
 
 if __name__ == "__main__":
     run_super_growth_a()
