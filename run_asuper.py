@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # 1. 系統配置中心 (已鎖定最新 Web App 網址)
 # ==========================================
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbx-ouaRxrkOKWz7tjWGG8Y3dCqJqUwXunk_7XqVhXh_Qp_6f6WC9MaYq7zlco0WeOaf/exec"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwaW2yk1tFc2wW2apBPmxj1xDHMlz_xWYbyzftaZPcWrZjurbLuEQbcTA--axdZ36OC/exec"
 TARGET_SHEET = "A_Super" 
 PORTFOLIO_CAPITAL = 1000000  
 TARGET_POSITIONS = 10  
