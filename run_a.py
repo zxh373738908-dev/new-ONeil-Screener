@@ -5,170 +5,250 @@ import datetime
 import requests
 import warnings
 import time
+import random
+from concurrent.futures import ThreadPoolExecutor
 
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 系統配置中心 (V3.0 TheMarketMemo 動量法則)
+# 1. 系統配置中心 (A股 V114 終極先勝後戰版 - 戰略+戰術融合)
 # ==========================================
-# 寫入您的最新 Webhook URL
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbw_f6Uy1OMIIl-4mLsAaxe1rXr64qYf2j0RHoKl3-xu0QOp-5kqFpk9rTBIV9Yf5-kz/exec"
-TARGET_SHEET = "O'Neil Watchlist"  # 🎯 寫入您截圖中的歐奈爾觀察列表
-BENCHMARK = "QQQ" # 基準指數，用於計算相對動量線 (RS Line)
+TARGET_SHEET = "A-Share screener"  # 🎯 輸出至 A 股專屬表格
 
-# 🚀 動量股票池 (包含文章提到的 FTI, NVDA 以及熱門 SaaS/半導體/能源等)
-GURU_LIST = [
-    "NVDA", "FTI", "OIH", "SHOP", "TEAM", "CRWD", "DDOG", "SNOW", "PLTR", 
-    "NOW", "WDAY", "ZS", "NET", "MDB", "AMD", "MU", "AVGO", "TSM", "ARM", 
-    "SMCI", "META", "AMZN", "MSFT", "GOOGL", "TSLA", "CEG", "VST"
+PORTFOLIO_CAPITAL = 1_000_000  
+TARGET_POSITIONS = 10
+AVAILABLE_CAPITAL = PORTFOLIO_CAPITAL * 0.95 
+TARGET_VALUE_PER_STOCK = AVAILABLE_CAPITAL / TARGET_POSITIONS 
+BENCHMARK_INDEX = "000300.SS" # 🇨🇳 使用滬深300作為大盤基準，計算 RS Line
+
+# 🚀 A股股票池 (涵蓋 AI算力、半導體、高息股、消費電子等活躍板塊)
+GURU_LIST_A = [
+    # 科技/半導體/AI
+    "603986.SS", "301308.SZ", "688525.SS", "688041.SS", "688256.SS", "002049.SZ",
+    "000938.SZ", "000977.SZ", "603019.SS", "300454.SZ", "300759.SZ", "002230.SZ",
+    "601138.SS", "300308.SZ", "002475.SZ", "601127.SS",
+    # 核心資產/製造/實體
+    "600938.SS", "601816.SS", "002352.SZ", "600754.SS", "603259.SS", "600276.SS", 
+    "601888.SS", "300750.SZ", "002594.SZ", "600519.SS", "000858.SZ", "600036.SS",
+    "601088.SS", "601857.SS", "600900.SS"
 ]
 
-def get_universe(): return list(set(GURU_LIST))
+def get_ret(series, days):
+    if series is None or len(series) < days + 1: return 0.0
+    val = float(series.iloc[-(days+1)])
+    return (float(series.iloc[-1]) / val) - 1 if val != 0 else 0.0
 
-# ==========================================
-# 2. 技術指標計算函數
-# ==========================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ema_up = up.ewm(com=period-1, adjust=False).mean()
+    ema_down = down.ewm(com=period-1, adjust=False).mean()
+    rs = ema_up / ema_down
     return 100 - (100 / (1 + rs))
 
+def fetch_info_a(t):
+    ticker = yf.Ticker(t)
+    for i in range(2):
+        try:
+            time.sleep(random.uniform(0.1, 0.2))
+            info = ticker.info
+            return t, {
+                'sector': str(info.get('sector', 'Unknown')),
+                'industry': str(info.get('industry', 'Unknown')),
+                'returnOnEquity': info.get('returnOnEquity', 0),
+                'revenueGrowth': info.get('revenueGrowth', 0)
+            }
+        except: time.sleep(0.5)
+    return t, {}
+
 # ==========================================
-# 3. 核心量化模型 V3.0
+# 3. 核心量化模型 V114 (A股專屬)
 # ==========================================
-def run_market_memo_momentum():
+def run_super_growth_a_v114():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    universe = get_universe()
-    universe.append(BENCHMARK) # 加入基準指數下載數據
+    universe = list(set(GURU_LIST_A))
     
-    print("\n" + "="*70)
-    print(f"🎯 [V3.0 歐奈爾/MarketMemo 動量引擎] 啟動...")
-    print(f"載入: RPS 加權排名、動量線 (vs {BENCHMARK})、RSI 回調點位、兩點鐘仰角...")
+    print("\n" + "="*65)
+    print(f"🚀 [A股 終極動量 V114] 先勝後戰啟動 | (RPS領導股 + VWAP狙擊點)")
 
-    # 下載近半年多一點的數據 (約130個交易日滿足120R計算)
-    hist_all = yf.download(universe, period="1y", progress=False, threads=True)
-    if hist_all.empty: return
+    print("⏳ 掃描量價、大盤(滬深300)與籌碼形態(VWAP)...")
+    # 下載數據，加入滬深300指數
+    hist_all = yf.download(universe + [BENCHMARK_INDEX], period="2y", progress=False, threads=False)
+    close_df, vol_df = hist_all['Close'], hist_all['Volume']
+    high_df, low_df = hist_all['High'], hist_all['Low']
     
-    close_df = hist_all['Close']
+    bm_close = close_df[BENCHMARK_INDEX].dropna() if BENCHMARK_INDEX in close_df else None
     
-    # 提取基準指數 (QQQ) 收盤價
-    bm_close = close_df[BENCHMARK].dropna()
-    
-    # --- 第一階段：計算所有股票的漲跌幅以進行 RPS 排名 ---
-    returns_pool = {}
-    for t in get_universe():
-        c = close_df[t].dropna()
-        if len(c) < 125: continue # 確保有足夠天數
+    tech_pool = {}
+    for t in universe:
+        if t not in close_df.columns or t not in vol_df.columns: continue
+        c, v, h, l = close_df[t].dropna(), vol_df[t].dropna(), high_df[t].dropna(), low_df[t].dropna()
+        if len(c) < 130: continue 
         
-        # 計算 20日, 60日, 120日 漲幅
-        ret_20 = c.iloc[-1] / c.iloc[-21] - 1
-        ret_60 = c.iloc[-1] / c.iloc[-61] - 1
-        ret_120 = c.iloc[-1] / c.iloc[-121] - 1
-        
-        returns_pool[t] = {"Ret20": ret_20, "Ret60": ret_60, "Ret120": ret_120}
-
-    # 轉換為 DataFrame 並計算百分位排名 (0~100分)
-    df_returns = pd.DataFrame.from_dict(returns_pool, orient='index')
-    df_returns['20R'] = df_returns['Ret20'].rank(pct=True) * 100
-    df_returns['60R'] = df_returns['Ret60'].rank(pct=True) * 100
-    df_returns['120R'] = df_returns['Ret120'].rank(pct=True) * 100
-    
-    # 🎯 TheMarketMemo 核心公式：加權總排名分數
-    df_returns['Total_Rank'] = 0.2 * df_returns['20R'] + 0.4 * df_returns['60R'] + 0.4 * df_returns['120R']
-
-    # --- 第二階段：計算個股技術型態 (動量線、兩點鐘仰角、RSI) ---
-    tech_pool = []
-    
-    for t in df_returns.index:
-        c = close_df[t].dropna()
         p = float(c.iloc[-1])
+        m50 = float(c.tail(50).mean())
+        avg_vol_10 = float(v.tail(10).mean())
         
-        # 1. 計算 VWAP (此處簡化以收盤價的均線代替，實戰可加上成交量)
-        ma_20 = c.rolling(20).mean()
-        ma_slope_pct = (ma_20.iloc[-1] - ma_20.iloc[-6]) / ma_20.iloc[-6]
-        is_2_oclock = ma_slope_pct > 0.015 # 兩點鐘方向
-        
-        # 2. 計算 RSI (尋找回調買點)
-        rsi = calculate_rsi(c, 14).iloc[-1]
-        
-        # 3. 計算動量線 (Relative Strength Line) = 個股 / QQQ
-        rs_line = c / bm_close
-        rs_line_ma = rs_line.rolling(50).mean() # 動量線的 50日均線
-        
-        rs_line_current = rs_line.iloc[-1]
-        rs_line_ma_current = rs_line_ma.iloc[-1]
-        rs_line_ma_5d_ago = rs_line_ma.iloc[-6]
-        
-        # 判斷：動量線 > 均線，且 均線向上運行
-        rs_line_bullish = (rs_line_current > rs_line_ma_current) and (rs_line_ma_current > rs_line_ma_5d_ago)
-        
-        total_rank = df_returns.loc[t, 'Total_Rank']
-        
-        # 🎯 V3.0 決策樹 (嚴格遵循 MarketMemo 邏輯)
-        score = total_rank
-        
-        if total_rank >= 80 and rs_line_bullish and rsi < 60 and is_2_oclock:
-            action = "🔥 完美回調買點"
-            msg = f"Rank>80且動量線強勢。RSI({round(rsi,1)})回調，加上兩點鐘仰角，絕佳切入點！"
-            score += 100 
-            
-        elif total_rank >= 80 and rs_line_bullish:
-            action = "🚀 領導股續抱"
-            msg = "動量排名霸榜，且相對 QQQ 走勢強勁。順勢而為，留意 -8% 止損。"
-            score += 50
-            
-        elif total_rank >= 70 and is_2_oclock:
-            action = "📈 潛力蓄勢"
-            msg = "動量剛起步(兩點鐘方向)，等待 Rank 突破 80 確認領導地位。"
-            score += 20
-            
-        elif total_rank < 50:
-            action = "🗑️ 弱勢標的"
-            msg = "排名落後，動量衰竭，依據紀律汰弱留強。"
-            score -= 50
-            
-        else:
-            action = "👀 整理觀察"
-            msg = "動量不夠極端，動量線或斜率未達標，持續觀察。"
+        # A股流動性過濾：日均成交額大於 1000 萬人民幣，且在 50 日均線之上
+        if p < 1.0 or (avg_vol_10 * p) < 10_000_000 or p < m50: continue 
 
-        tech_pool.append({
-            "Ticker": t, "Total_Rank": total_rank, "R20": df_returns.loc[t, '20R'], 
-            "R60": df_returns.loc[t, '60R'], "R120": df_returns.loc[t, '120R'],
-            "RSI": rsi, "Slope": ma_slope_pct, "Action": action, "Msg": msg, 
-            "Price": p, "Score": score
+        # 1. 戰略層面：計算 V113 動量回報率 (20R/60R/120R 基礎)
+        ret_1m = get_ret(c, 21) * 100
+        ret_3m = get_ret(c, 63) * 100
+        ret_6m = get_ret(c, 126) * 100
+
+        # 2. 戰術層面：計算 V112 形態學與籌碼指標 (前高紅黑線、VWAP成本、量比)
+        red_line_h20 = float(h.shift(1).tail(20).max())
+        black_line_h60 = float(h.shift(1).tail(60).max())
+        typical_price = (h + l + c) / 3
+        vwap_20 = float((typical_price * v).tail(20).sum() / v.tail(20).sum())
+        
+        dist_vwap = ((p - vwap_20) / vwap_20) * 100
+        dist_red = ((p - red_line_h20) / red_line_h20) * 100
+        dist_black = ((p - black_line_h60) / black_line_h60) * 100
+        vr = float(v.iloc[-1]) / float(v.tail(50).mean()) if float(v.tail(50).mean()) > 0 else 1.0
+
+        # 3. 大盤對比：計算 V113 基準相對強度 (RS Line) 與 RSI
+        rsi_14 = float(calculate_rsi(c, 14).iloc[-1])
+        rs_trend_ok = False
+        if bm_close is not None:
+            aligned_c, aligned_bm = c.align(bm_close, join='inner')
+            rs_line = aligned_c / aligned_bm
+            rs_ma50 = rs_line.rolling(window=50).mean()
+            if len(rs_line) > 50:
+                # 動量線在均線之上，且均線趨勢向上
+                rs_trend_ok = (rs_line.iloc[-1] > rs_ma50.iloc[-1]) and (rs_ma50.iloc[-1] > rs_ma50.iloc[-10])
+
+        tech_pool[t] = {
+            "P": p, "VR": vr, "RSI_14": rsi_14, "RS_Trend_OK": rs_trend_ok,
+            "VWAP20": vwap_20, "DistVWAP": dist_vwap, "DistRed": dist_red, "DistBlack": dist_black,
+            "Ret_1M": ret_1m, "Ret_3M": ret_3m, "Ret_6M": ret_6m,
+            "Spark": ",".join([str(round(val, 2)) for val in c.tail(126).tolist()])
+        }
+
+    if not tech_pool: return print("⚠️ 查無符合標的。")
+
+    # 4. RPS 動量強度全市場排名 (V113 戰略核心)
+    rank_1m = (pd.Series({t: d['Ret_1M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
+    rank_3m = (pd.Series({t: d['Ret_3M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
+    rank_6m = (pd.Series({t: d['Ret_6M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
+
+    for t in tech_pool:
+        tech_pool[t]['20R'] = rank_1m.get(t, 0)
+        tech_pool[t]['60R'] = rank_3m.get(t, 0)
+        tech_pool[t]['120R'] = rank_6m.get(t, 0)
+        # 加權總分 (近3個月、半年的穩定動能權重較高)
+        tech_pool[t]['Total_Rank'] = (0.2 * tech_pool[t]['20R']) + (0.4 * tech_pool[t]['60R']) + (0.4 * tech_pool[t]['120R'])
+
+    # 🛑 宏觀戰略過濾：嚴格要求 RPS 總分 >= 75，我們只做市場前 25% 的領導股
+    filtered_tech_pool = {t: d for t, d in tech_pool.items() if d['Total_Rank'] >= 75}
+
+    print(f"⏳ 拉取基本面 (過濾出 {len(filtered_tech_pool)} 檔 A股市場領導股)...")
+    infos = {}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        for t, info in executor.map(fetch_info_a, list(filtered_tech_pool.keys())):
+            if info: infos[t] = info
+
+    all_cands = []
+    for t, data in filtered_tech_pool.items():
+        info = infos.get(t, {})
+        sec, ind = info.get('sector', 'Unknown'), info.get('industry', 'Unknown')
+        
+        # V112 基本面延伸：領導股加上業績雙驅動會有額外加分
+        roe = (info.get('returnOnEquity') or 0) * 100
+        rev_growth = (info.get('revenueGrowth') or 0) * 100
+        fund_bonus = (10 if roe > 10 else 0) + (10 if rev_growth > 15 else 0) # A股業績門檻微調
+
+        total_rank = data['Total_Rank']
+        rsi = data['RSI_14']
+        dist_vwap, dist_red, dist_black, vr = data['DistVWAP'], data['DistRed'], data['DistBlack'], data['VR']
+        
+        strategy_score = total_rank + fund_bonus
+        
+        # 🎯 終極戰術分析：結合大盤趨勢、VWAP籌碼與形態學 (先勝後戰)
+        rs_tag = "📈跑贏滬深300" if data['RS_Trend_OK'] else "⚠️大盤偏弱"
+        
+        action_tag = ""
+        # 情況 A：跌破主力防線
+        if dist_vwap < -3.0: 
+            action_tag = f"✂️跌破籌碼線(VWAP{dist_vwap:+.1f}%)"
+            strategy_score -= 20
+        # 情況 B：大戰略突破 (過60日前高且放量)
+        elif dist_black > 0 and vr > 1.2:
+            action_tag = "🚀大底突破(放量)"
+            strategy_score += 15
+        # 情況 C：短線突破 (過20日頸線且放量)
+        elif dist_red > 0 and vr > 1.2:
+            action_tag = "🔥短線突破(放量)"
+            strategy_score += 10
+        # 情況 D：完美回踩 (靠近VWAP、量縮、RSI未超買) -- 最佳盈虧比狙擊點！
+        elif 0 <= dist_vwap <= 4.0 and vr < 0.8 and rsi < 60:
+            action_tag = "🎯完美回踩VWAP(量縮低吸)"
+            strategy_score += 20 
+        # 情況 E：過熱警報 (偏離成本線過遠)
+        elif dist_vwap > 8.0 or rsi > 70: 
+            action_tag = f"🔴過熱勿追(RSI:{rsi:.0f}/VWAP{dist_vwap:+.1f}%)"
+            strategy_score -= 15
+        else:
+            action_tag = f"🛡️均線震盪(RSI:{rsi:.0f})"
+
+        # 結合 RS 狀態與個股戰術
+        final_action = f"{rs_tag} | {action_tag}"
+        
+        # V113 鐵律：無條件 -8% 止損 (保命符)
+        price = data['P']
+        stop_loss = price * 0.92 
+        # A 股以 100 股為一手
+        target_shares = max(100, math.floor((TARGET_VALUE_PER_STOCK / price) / 100) * 100)
+
+        all_cands.append({
+            "Ticker": t, "Sector": sec, "Industry": ind[:12], 
+            "Score": strategy_score, "Action": final_action, 
+            "Price": price, "StopLoss": stop_loss,
+            "TotalRank": total_rank, "R20": data['20R'], "R60": data['60R'], "R120": data['120R'],
+            "TargetShares": target_shares,
+            "Trend": f'=SPARKLINE({{{data["Spark"]}}}, {{"charttype","line";"color","black"}})'
         })
 
-    # 精選排序
-    tech_pool.sort(key=lambda x: x['Score'], reverse=True)
-    top_results = tech_pool[:15]
+    # 按綜合評分降序排列
+    all_cands.sort(key=lambda x: x['Score'], reverse=True)
     
-    # --- 第三階段：推送到 Google Sheets ---
-    matrix = []
-    headers = ["排名", "代碼", "V3 決策信號", "TheMarketMemo 邏輯解析", "🏆 Total Rank", "20R (0.2)", "60R (0.4)", "120R (0.4)", "RSI (進場)", "均線仰角", "現價", "更新時間"]
+    # 限制同一行業過度集中 (風險分散)
+    top_10, sec_cnt = [], {}
+    for r in all_cands:
+        s = r['Sector']
+        if sec_cnt.get(s, 0) >= 3: continue 
+        top_10.append(r)
+        sec_cnt[s] = sec_cnt.get(s, 0) + 1
+        if len(top_10) >= TARGET_POSITIONS: break
     
-    m_status = f"策略: RPS>80領導股 + 動量線強於QQQ + RSI回調進場 + 兩點鐘仰角"
-    matrix.append([f"O'Neil / MarketMemo V3.0", f"狀態: {m_status}", ""] + [""] * 9)
-    matrix.append(headers)
+    # 輸出矩陣設計
+    headers_col = ["代碼", "板塊", "現價", "半年走勢", "RPS領導排名", "動量結構(20/60/120)", "戰術指令 (大盤狀態 | 籌碼與形態)", "鐵血止損價 (-8%)", "綜合評分", "建議股數", "更新時間"]
+    matrix = [[f"A-Share Momentum V114 (戰略領導股 + 戰術狙擊點)", f"{update_time}", ""] + [""] * 8, headers_col]
     
-    for i, r in enumerate(top_results):
-        slope_str = f"{r['Slope']*100:+.2f}%" 
-        
+    for i, r in enumerate(top_10):
+        # 標註極強勢股
+        rank_str = f"{r['TotalRank']:.1f} 🔥" if r['TotalRank'] >= 80 else f"{r['TotalRank']:.1f}"
+        struct_str = f"{int(r['R20'])} / {int(r['R60'])} / {int(r['R120'])}"
+
         matrix.append([
-            f"T{i+1}", f"👑 {r['Ticker']}", r['Action'], r['Msg'], 
-            f"{round(r['Total_Rank'], 1)} 分", f"{round(r['R20'], 1)}", 
-            f"{round(r['R60'], 1)}", f"{round(r['R120'], 1)}", 
-            f"{round(r['RSI'], 1)}", slope_str, f"${round(r['Price'], 2)}", update_time
+            f"👑 {r['Ticker']}" if i < 3 else r['Ticker'], r['Industry'], 
+            f"¥{round(r['Price'], 2)}", r['Trend'], 
+            rank_str, struct_str, r['Action'], 
+            f"¥{round(r['StopLoss'], 2)}",
+            f"{round(r['Score'], 1)}", r['TargetShares'], update_time
         ])
 
-    print(f"📤 正在推送 V3.0 動量陣型至 Google Sheets ({TARGET_SHEET})...")
+    print(f"📤 推送 A股 V114 終極矩陣至 Google Sheets ({TARGET_SHEET})...")
     response = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     
-    if response.status_code == 200:
-        print("✅ 數據已成功寫入！您的「機構級動量篩選器」已準備就緒。")
-    else:
+    if response.status_code == 200: 
+        print(f"✅ V114 數據推送成功！準備迎接 A股先勝後戰的主升段。")
+    else: 
         print(f"❌ 推送失敗，狀態碼: {response.status_code}")
 
 if __name__ == "__main__":
-    run_market_memo_momentum()
+    import math # 確保 math 函式可用於一手 100 股計算
+    run_super_growth_a_v114()
