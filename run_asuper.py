@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # 1. 系統配置中心 (V190 VWAP 雙線突破版)
 # ==========================================
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1pIM7iO43lcLQpOmi5LCJIn3VN9a0Ilf9amoy1EtQV_GBXJkk_A4PpsrJxKzH7i51/exec"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbz-sv8TCkC9lDMKvBInu6KGeS0P-OOxnlOLNkC-f3p6iHwIDGFBiDC6sN-eZZR_Nm3c/exec"
 TARGET_SHEET = "A_Super" 
 PORTFOLIO_CAPITAL = 1000000  
 TARGET_POSITIONS = 10  
