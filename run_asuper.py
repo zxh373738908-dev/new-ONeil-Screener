@@ -12,22 +12,18 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 系統配置中心 (已鎖定最新 Web App 網址)
+# 1. 系統配置中心
 # ==========================================
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwaW2yk1tFc2wW2apBPmxj1xDHMlz_xWYbyzftaZPcWrZjurbLuEQbcTA--axdZ36OC/exec"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwaW2p_jF7PjM2fG8o_qD3ZlK6v-n4eY8_3o6L5qA/exec" # 請確認為您最新生效的 URL
 TARGET_SHEET = "A_Super" 
 PORTFOLIO_CAPITAL = 1000000  
 TARGET_POSITIONS = 10  
 
-# 🚀 V190 股票池
-GURU_LIST_A = [
-    # 存儲/半導體/AI晶片 (對標 MU 美光)
+# 🚀 V200 核心股票池
+GURU_LIST_A =[
     "603986.SS", "301308.SZ", "688525.SS", "688041.SS", "688256.SS", "002049.SZ",
-    # AI伺服器與硬體 (對標 SOXX)
     "000938.SZ", "000977.SZ", "603019.SS", "300454.SZ",
-    # 週期擴散/實體經濟
     "600938.SS", "601816.SS", "002352.SZ", "600754.SS",
-    # 防禦與醫藥
     "603259.SS", "600276.SS", "601888.SS", "300759.SZ"
 ]
 
@@ -42,22 +38,21 @@ def fetch_info_a(t):
             info = ticker.info
             if info and 'industry' in info:
                 return t, str(info.get('sector', 'Unknown'))
-        except: 
-            time.sleep(0.3)
+        except: time.sleep(0.3)
     return t, 'Unknown'
 
 # ==========================================
-# 2. 核心量化模型 V190
+# 2. 核心量化模型 V200 (自動計算精確買賣點)
 # ==========================================
 def run_super_growth_a():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe_a()
     print("\n" + "="*65)
-    print(f"🎯 [A股 V190 終極版] 啟動 | 當前目標URL: {WEBAPP_URL[:45]}...")
+    print(f"🎯 [A股 V200 買賣點標註版] 啟動 | 自動計算買入區間、止損與目標價...")
 
     hist_all = yf.download(universe, period="1y", progress=False, threads=False)
     if hist_all.empty: 
-        print("❌ 無法獲取股票歷史數據，請稍後再試。")
+        print("❌ 無法獲取股票歷史數據")
         return
     
     close_df = hist_all['Close']
@@ -73,23 +68,21 @@ def run_super_growth_a():
             p = float(c.iloc[-1])
             if len(c) < 100 or p < 1.0: continue
             
+            # 計算 VWAP 均線 (紅藍線) 與 宏觀黑線
             typical_price = c
             vwap_20_red = (typical_price * v).rolling(window=20).sum() / v.rolling(window=20).sum()
             vwap_60_blue = (typical_price * v).rolling(window=60).sum() / v.rolling(window=60).sum()
             
             v_red = float(vwap_20_red.iloc[-1])
             v_blue = float(vwap_60_blue.iloc[-1])
-            
             black_line = float(h.shift(3).rolling(window=60).max().iloc[-1])
-            red_line = float(h.shift(3).rolling(window=20).max().iloc[-1])
             
             was_below = float(c.iloc[-4]) < float(vwap_20_red.iloc[-4]) or float(c.iloc[-4]) < float(vwap_60_blue.iloc[-4])
             is_above_now = p > v_red and p > v_blue
             
             tech_pool[t] = {
                 "P": p, "VWAP_Red": v_red, "VWAP_Blue": v_blue, 
-                "BlackLine": black_line, "RedLine": red_line,
-                "WasBelow": was_below, "IsAboveNow": is_above_now,
+                "BlackLine": black_line, "WasBelow": was_below, "IsAboveNow": is_above_now,
                 "RS_Raw": (float(c.iloc[-1])/float(c.iloc[-21]) - 1)*0.4 + (float(c.iloc[-1])/float(c.iloc[-63]) - 1)*0.6
             }
         except: continue
@@ -111,30 +104,43 @@ def run_super_growth_a():
         black = data['BlackLine']
         score = rs
         
-        if data['IsAboveNow'] and data['WasBelow'] and rs > 60:
-            action = "🔥 MU式雙線突破"
-            msg = "剛剛放量站上 VWAP 與全換手均線，套牢盤清空，主升段點火！"
-            score *= 1.5
-        elif p >= black * 0.98 and p <= black * 1.05 and rs > 70:
+        # 🎯 核心演算法：根據大師邏輯自動生成「買入區間 / 止損價 / 目標價」
+        if p >= black * 0.98 and p <= black * 1.05 and rs > 70:
             action = "🎯 先勝回踩狙擊"
-            msg = "突破黑線前高後回踩確認，戰略勝利，精準狙擊！"
-            score *= 1.3
+            buy_zone = f"¥{round(black * 0.995, 2)} ~ ¥{round(black * 1.01, 2)}"
+            stop_loss = f"¥{round(black * 0.975, 2)}"
+            target_price = f"¥{round(black * 1.15, 2)} (+15%)"
+            msg = "突破黑線前高後回踩確認，絕佳狙擊點！"
+            score *= 1.5
+            
+        elif data['IsAboveNow'] and data['WasBelow'] and rs > 60:
+            action = "🔥 MU式雙線突破"
+            buy_zone = f"¥{round(v_red * 0.995, 2)} ~ ¥{round(p, 2)}"
+            stop_loss = f"¥{round(min(v_red, v_blue) * 0.98, 2)}"
+            target_price = f"¥{round(black, 2)} (測黑線)"
+            msg = "剛剛放量站上雙均線，套牢盤清空，點火啟動！"
+            score *= 1.4
+            
         elif p > v_red > v_blue:
             action = "🚀 籌碼多頭排列"
-            msg = "現價 > VWAP > 全換手線，籌碼真空，讓利潤奔跑"
+            buy_zone = f"¥{round(v_red, 2)} ~ ¥{round(v_red * 1.02, 2)} (回踩加)"
+            stop_loss = f"¥{round(v_red * 0.97, 2)}"
+            target_price = f"¥{round(max(black, p * 1.12), 2)}"
+            msg = "現價 > VWAP > 全換手線，讓利潤奔跑！"
             score *= 1.1
-        elif p < v_red and p < v_blue:
-            action = "🔪 均線死穴"
-            msg = "被 VWAP 與換手線死死壓制，空頭排列，無情汰除"
-            score *= 0.1
+            
         else:
-            action = "👀 籌碼纏鬥"
-            msg = "在兩條均線間震盪，等待方向突破"
-            score *= 0.5
+            action = "👀 籌碼纏鬥/破位"
+            buy_zone = "❌ 嚴禁開倉"
+            stop_loss = f"¥{round(v_blue * 0.97, 2)}"
+            target_price = f"¥{round(v_red, 2)}"
+            msg = "均線糾纏或空頭壓制，耐心等待方向"
+            score *= 0.3
 
         all_cands.append({
             "Ticker": t, "Sector": sec[:15], "Score": score, 
             "Action": action, "Msg": msg, "RS": rs, "Price": p, 
+            "BuyZone": buy_zone, "StopLoss": stop_loss, "Target": target_price,
             "VWAP_Red": v_red, "VWAP_Blue": v_blue, "BlackLine": black
         })
 
@@ -144,28 +150,37 @@ def run_super_growth_a():
     allocation_per_stock = PORTFOLIO_CAPITAL / max(len(top_10), 1)
     
     matrix = []
-    headers = ["排名", "代碼", "V190 大師圖表信號", "量價籌碼解析", "RS強度", "現價", "🔴 VWAP加權均線", "🔵 全換手均線", "⚫ 宏觀黑線(前高)", "應持股數", "更新時間"]
+    # 📋 V200 實戰表頭：直接包含買賣點與風控
+    headers = [
+        "排名", "代碼", "作戰信號", "🎯 建議買入區間", "🛑 嚴格止損價", "💰 突破目標價", 
+        "現價", "RS強度", "🔴 VWAP(紅)", "🔵 換手(藍)", "⚫ 黑線(前高)", "應持股數", "量價籌碼解析", "更新時間"
+    ]
     
-    m_status = f"核心: MU雙線突破 (紅藍線) + SOXX先勝後戰 (黑線)"
-    matrix.append([f"Master Sniper V190 (全籌碼突破版)", f"狀態: {m_status}", ""] + [""] * 8)
+    m_status = f"V200 實戰買賣點自動標註版 | 先勝後戰 + 籌碼突破"
+    matrix.append([f"Master Sniper V200 (實戰精確買賣點版)", f"狀態: {m_status}", ""] + [""] * 11)
     matrix.append(headers)
     
     for i, r in enumerate(top_10):
         shares = math.floor(allocation_per_stock / (r['Price'] * 100)) * 100
         matrix.append([
-            f"T{i+1}", f"👑 {r['Ticker']}", r['Action'], r['Msg'], 
-            f"{round(r['RS'], 1)}", f"¥{round(r['Price'], 2)}", 
-            f"¥{round(r['VWAP_Red'], 2)}", f"¥{round(r['VWAP_Blue'], 2)}", 
-            f"¥{round(r['BlackLine'], 2)}", f"{shares:,} 股", update_time
+            f"T{i+1}", f"👑 {r['Ticker']}", r['Action'], 
+            r['BuyZone'],       # 🎯 建議買入區間
+            r['StopLoss'],      # 🛑 嚴格止損價
+            r['Target'],        # 💰 突破目標價
+            f"¥{round(r['Price'], 2)}", 
+            f"{round(r['RS'], 1)}", 
+            f"¥{round(r['VWAP_Red'], 2)}", 
+            f"¥{round(r['VWAP_Blue'], 2)}", 
+            f"¥{round(r['BlackLine'], 2)}", 
+            f"{shares:,} 股", 
+            r['Msg'], 
+            update_time
         ])
 
     print(f"📤 準備推送 {len(matrix)} 行數據至 [{TARGET_SHEET}] 分頁...")
     res = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     print("後台 HTTP 狀態碼:", res.status_code)
     print("後台完整回應:", res.text)
-    
-    if res.status_code == 200:
-        print("\n✅ 推送成功！請刷新 Google Sheets 檢視。")
 
 if __name__ == "__main__":
     run_super_growth_a()
