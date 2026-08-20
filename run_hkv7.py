@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 系統配置中心 (V114 終極動量形態版 - 戰略+戰術融合)
+# 1. 系統配置中心 (V114 終極動量形態版 - 直白買賣提示)
 # ==========================================
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycby1fIw-8zcKpj8ALoSYszw8dG9SXsps63nXHnwRDOT2vWoXP6hf58t4XIkWnWvN4iUj/exec"
 TARGET_SHEET = "HKv7-Share Screener"
@@ -65,14 +65,14 @@ def fetch_info_hk(t):
     return t, {}
 
 # ==========================================
-# 3. 核心量化模型 V114
+# 3. 核心量化模型 V114 (直白行動版)
 # ==========================================
-def run_super_growth_hk_v114():
+def run_super_growth_hk_v114_explicit():
     update_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
     universe = list(set(GURU_LIST_HK))
     
     print("\n" + "="*60)
-    print(f"🚀 [港股 動量矩陣 V114] 終極版啟動 | (RPS領導股 + VWAP/形態狙擊點)")
+    print(f"🚀 [港股 動量矩陣 V114] 終極版啟動 | 直白買賣提示 (RPS領導股 + 形態狙擊點)")
 
     print("⏳ 掃描量價、大盤(HSI)與籌碼形態(VWAP)...")
     hist_all = yf.download(universe + [BENCHMARK_INDEX], period="2y", progress=False, threads=False)
@@ -92,12 +92,10 @@ def run_super_growth_hk_v114():
         avg_vol_10 = float(v.tail(10).mean())
         if p < 1.0 or (avg_vol_10 * p) < 10_000_000 or p < m50: continue 
 
-        # 1. 計算 V113 的動量回報率 (20R/60R/120R 基礎)
         ret_1m = get_ret(c, 21) * 100
         ret_3m = get_ret(c, 63) * 100
         ret_6m = get_ret(c, 126) * 100
 
-        # 2. 計算 V112 的形態學與籌碼指標 (紅黑線、VWAP、量比)
         red_line_h20 = float(h.shift(1).tail(20).max())
         black_line_h60 = float(h.shift(1).tail(60).max())
         typical_price = (h + l + c) / 3
@@ -108,7 +106,6 @@ def run_super_growth_hk_v114():
         dist_black = ((p - black_line_h60) / black_line_h60) * 100
         vr = float(v.iloc[-1]) / float(v.tail(50).mean()) if float(v.tail(50).mean()) > 0 else 1.0
 
-        # 3. 計算 V113 的大盤強度 (RS Line) 與 RSI
         rsi_14 = float(calculate_rsi(c, 14).iloc[-1])
         rs_trend_ok = False
         if hsi_close is not None:
@@ -127,7 +124,6 @@ def run_super_growth_hk_v114():
 
     if not tech_pool: return print("⚠️ 查無符合標的。")
 
-    # 4. 計算 RPS 動量強度排名 (V113 戰略核心)
     rank_1m = (pd.Series({t: d['Ret_1M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
     rank_3m = (pd.Series({t: d['Ret_3M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
     rank_6m = (pd.Series({t: d['Ret_6M'] for t, d in tech_pool.items()}).rank(pct=True) * 100).to_dict()
@@ -152,7 +148,6 @@ def run_super_growth_hk_v114():
         info = infos.get(t, {})
         sec, ind = info.get('sector'), info.get('industry')
         
-        # V112 延伸：領導股加上業績雙驅動會有額外加分
         roe = (info.get('returnOnEquity') or 0) * 100
         rev_growth = (info.get('revenueGrowth') or 0) * 100
         fund_bonus = (10 if roe > 15 else 0) + (10 if rev_growth > 20 else 0)
@@ -163,37 +158,40 @@ def run_super_growth_hk_v114():
         
         strategy_score = total_rank + fund_bonus
         
-        # 🎯 終極戰術分析：結合大盤趨勢、VWAP籌碼與形態學
+        # =======================================================
+        # 🎯 終極戰術分析：直白顯示【買/賣/觀望】
+        # =======================================================
         rs_tag = "📈跑贏大盤" if data['RS_Trend_OK'] else "⚠️大盤偏弱"
         
         action_tag = ""
-        # 情況 A：跌破主力防線
+        # 1. 賣出訊號：跌破主力防線
         if dist_vwap < -3.0: 
-            action_tag = f"✂️跌破籌碼線(VWAP{dist_vwap:+.1f}%)"
+            action_tag = f"☠️【賣出】破主力線(VWAP{dist_vwap:+.1f}%)"
             strategy_score -= 20
-        # 情況 B：大戰略突破 (過60日前高且放量)
+        # 2. 買入訊號：大戰略突破
         elif dist_black > 0 and vr > 1.2:
-            action_tag = "🚀大底突破(放量)"
+            action_tag = "🟢【買入】大底放量突破"
             strategy_score += 15
-        # 情況 C：短線突破 (過20日頸線且放量)
+        # 3. 買入訊號：短線突破
         elif dist_red > 0 and vr > 1.2:
-            action_tag = "🔥短線突破(放量)"
+            action_tag = "🟢【買入】短線放量突破"
             strategy_score += 10
-        # 情況 D：完美回踩 (靠近VWAP、量縮、RSI未超買) -- 最佳盈虧比買點！
+        # 4. 買入訊號：完美回踩 (最佳買點)
         elif 0 <= dist_vwap <= 4.0 and vr < 0.8 and rsi < 60:
-            action_tag = "🎯完美回踩VWAP(量縮低吸)"
+            action_tag = "🟢【強力買入】完美量縮回踩VWAP"
             strategy_score += 20 
-        # 情況 E：過熱警報
+        # 5. 止盈/觀望訊號：過熱警報
         elif dist_vwap > 8.0 or rsi > 70: 
-            action_tag = f"🔴過熱勿追(RSI:{rsi:.0f}/VWAP{dist_vwap:+.1f}%)"
+            action_tag = f"💰【止盈/觀望】高位過熱(RSI:{rsi:.0f})"
             strategy_score -= 15
+        # 6. 持股續抱訊號：沒有方向
         else:
-            action_tag = f"🛡️均線震盪(RSI:{rsi:.0f})"
+            action_tag = f"🛡️【持股/觀望】均線震盪(RSI:{rsi:.0f})"
 
         # 結合 RS 狀態與個股戰術
         final_action = f"{rs_tag} | {action_tag}"
+        # =======================================================
         
-        # V113 鐵律：無條件 -8% 止損
         price = data['P']
         stop_loss = price * 0.92 
         target_shares = max(100, round((TARGET_VALUE_PER_STOCK / price) / 100) * 100)
@@ -211,14 +209,13 @@ def run_super_growth_hk_v114():
     top_10, sec_cnt = [], {}
     for r in all_cands:
         s = r['Sector']
-        if sec_cnt.get(s, 0) >= 3: continue # 避免單一行業過於集中
+        if sec_cnt.get(s, 0) >= 3: continue 
         top_10.append(r)
         sec_cnt[s] = sec_cnt.get(s, 0) + 1
         if len(top_10) >= TARGET_POSITIONS: break
     
-    # 輸出矩陣設計 (更緊湊、專業的欄位)
-    headers_col = ["Ticker", "Industry", "Last Price", "半年走勢", "RPS領導排名", "動量結構(20/60/120)", "戰術指令 (大盤狀態 | 籌碼與形態)", "鐵血止損價", "綜合評分", "建議股數", "更新時間"]
-    matrix = [[f"Momentum Portfolio V114 (戰略領導股 + 戰術狙擊點)", f"{update_time}", ""] + [""] * 8, headers_col]
+    headers_col = ["Ticker", "Industry", "Last Price", "半年走勢", "RPS領導排名", "動量結構(20/60/120)", "直白買賣點 (大盤 | 行動指令)", "鐵血止損價", "綜合評分", "建議股數", "更新時間"]
+    matrix = [[f"Momentum Portfolio V114 (戰略領導股 + 直白買賣提示版)", f"{update_time}", ""] + [""] * 8, headers_col]
     
     for i, r in enumerate(top_10):
         rank_str = f"{r['TotalRank']:.1f} 🔥" if r['TotalRank'] >= 80 else f"{r['TotalRank']:.1f}"
@@ -232,7 +229,7 @@ def run_super_growth_hk_v114():
             f"{round(r['Score'], 1)}", r['TargetShares'], update_time
         ])
 
-    print("📤 推送 V114 終極矩陣至 Google Sheets...")
+    print("📤 推送 V114 (直白買賣版) 矩陣至 Google Sheets...")
     response = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     
     if response.status_code == 200: 
@@ -241,4 +238,4 @@ def run_super_growth_hk_v114():
         print(f"❌ 推送失敗，狀態碼: {response.status_code}, 錯誤訊息: {response.text}")
 
 if __name__ == "__main__":
-    run_super_growth_hk_v114()
+    run_super_growth_hk_v114_explicit()
