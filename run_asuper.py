@@ -12,9 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. 系統配置中心
+# 1. 系統配置中心 (已修正為您的真實有效 Web App URL)
 # ==========================================
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwaW2p_jF7PjM2fG8o_qD3ZlK6v-n4eY8_3o6L5qA/exec" # 請確認為您最新生效的 URL
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbz-sv8TCkC9lDMKvBInu6KGeS0P-OOxnlOLNkC-f3p6iHwIDGFBiDC6sN-eZZR_Nm3c/exec"
 TARGET_SHEET = "A_Super" 
 PORTFOLIO_CAPITAL = 1000000  
 TARGET_POSITIONS = 10  
@@ -38,7 +38,8 @@ def fetch_info_a(t):
             info = ticker.info
             if info and 'industry' in info:
                 return t, str(info.get('sector', 'Unknown'))
-        except: time.sleep(0.3)
+        except: 
+            time.sleep(0.3)
     return t, 'Unknown'
 
 # ==========================================
@@ -68,7 +69,6 @@ def run_super_growth_a():
             p = float(c.iloc[-1])
             if len(c) < 100 or p < 1.0: continue
             
-            # 計算 VWAP 均線 (紅藍線) 與 宏觀黑線
             typical_price = c
             vwap_20_red = (typical_price * v).rolling(window=20).sum() / v.rolling(window=20).sum()
             vwap_60_blue = (typical_price * v).rolling(window=60).sum() / v.rolling(window=60).sum()
@@ -104,7 +104,7 @@ def run_super_growth_a():
         black = data['BlackLine']
         score = rs
         
-        # 🎯 核心演算法：根據大師邏輯自動生成「買入區間 / 止損價 / 目標價」
+        # 🎯 核心演算法：精準買賣點計算
         if p >= black * 0.98 and p <= black * 1.05 and rs > 70:
             action = "🎯 先勝回踩狙擊"
             buy_zone = f"¥{round(black * 0.995, 2)} ~ ¥{round(black * 1.01, 2)}"
@@ -150,7 +150,6 @@ def run_super_growth_a():
     allocation_per_stock = PORTFOLIO_CAPITAL / max(len(top_10), 1)
     
     matrix = []
-    # 📋 V200 實戰表頭：直接包含買賣點與風控
     headers = [
         "排名", "代碼", "作戰信號", "🎯 建議買入區間", "🛑 嚴格止損價", "💰 突破目標價", 
         "現價", "RS強度", "🔴 VWAP(紅)", "🔵 換手(藍)", "⚫ 黑線(前高)", "應持股數", "量價籌碼解析", "更新時間"
@@ -164,9 +163,9 @@ def run_super_growth_a():
         shares = math.floor(allocation_per_stock / (r['Price'] * 100)) * 100
         matrix.append([
             f"T{i+1}", f"👑 {r['Ticker']}", r['Action'], 
-            r['BuyZone'],       # 🎯 建議買入區間
-            r['StopLoss'],      # 🛑 嚴格止損價
-            r['Target'],        # 💰 突破目標價
+            r['BuyZone'], 
+            r['StopLoss'], 
+            r['Target'], 
             f"¥{round(r['Price'], 2)}", 
             f"{round(r['RS'], 1)}", 
             f"¥{round(r['VWAP_Red'], 2)}", 
@@ -181,6 +180,9 @@ def run_super_growth_a():
     res = requests.post(WEBAPP_URL, json={"sheet_name": TARGET_SHEET, "data": matrix}, timeout=60)
     print("後台 HTTP 狀態碼:", res.status_code)
     print("後台完整回應:", res.text)
+    
+    if res.status_code == 200:
+        print("\n✅ 推送成功！請刷新 Google Sheets 檢視。")
 
 if __name__ == "__main__":
     run_super_growth_a()
