@@ -1,4 +1,3 @@
-cat << 'EOF' > run_master_futu_safe.py
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -78,7 +77,7 @@ def fetch_info(t):
     except: return t, {}
 
 # =====================================================================
-# 3. 安全無阻塞富途數據抓取 (透過本地 REST 端口，帶 1.5 秒硬超時防護)
+# 3. 安全無阻塞富途數據抓取 (帶 1.5 秒硬超時防護，GitHub 雲端自動跳過)
 # =====================================================================
 def fetch_single_futu(t):
     if t in MACRO_BENCHMARKS or t == "SPY":
@@ -118,7 +117,7 @@ def sync_to_google_sheet(sheet_name, matrix):
         res = requests.post(WEBAPP_URL, json=payload, timeout=60)
         print(f"📥 伺服器狀態碼: {res.status_code}")
         if res.status_code == 200:
-            print(f"🎉 恭喜！本機富途真實數據已成功寫入 Google Sheet [{sheet_name}]！")
+            print(f"🎉 恭喜！選股名單已 100% 成功同步至 Google Sheet [{sheet_name}]！")
     except Exception as e: 
         print(f"❌ 同步失敗: {e}")
 
@@ -130,7 +129,7 @@ def run_master_futu_safe():
     universe = get_universe()
     
     print("\n" + "="*65)
-    print(f"⚔️ [大師先勝獵殺系統 V113 安全版] 啟動 | 監測池: {len(universe)}")
+    print(f"⚔️ [大師先勝獵殺系統 V113 雲端/本機通用版] 啟動 | 監測池: {len(universe)}")
 
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df, vol_df, high_df, low_df = hist_all['Close'], hist_all['Volume'], hist_all['High'], hist_all['Low']
@@ -289,8 +288,8 @@ def run_master_futu_safe():
     pre_candidates.sort(key=lambda x: x['Score'], reverse=True)
     top_pool = pre_candidates[:35]
 
-    # 多線程從富途本地 REST 端口提取數據 (若未開 OpenD 會安全跳過，絕不卡死)
-    print(f"📡 正在從本地富途 API 提取 {len(top_pool)} 檔標的之真實主力大單...")
+    # 多線程從富途本地 REST 端口提取數據
+    print(f"📡 正在嘗試提取 {len(top_pool)} 檔標的之主力資金流...")
     futu_flows = {}
     with ThreadPoolExecutor(max_workers=8) as executor:
         for t, flow_data in executor.map(fetch_single_futu, [r['Ticker'] for r in top_pool]):
@@ -374,7 +373,7 @@ def run_master_futu_safe():
         top_leaders.append(r)
         if len(top_leaders) >= 30: break
 
-    # 4. 組裝輸出矩陣 (嚴格 25 欄對齊)
+    # 4. 組裝輸出矩陣
     headers = [
         "排名", "代碼", "名稱/行業", "作戰指令(大師先勝)", "🎯期權先勝策略指引", "Msg結構標籤", 
         "Total Rank", "20R(1M)", "60R(3M)", "120R(6M)", "RSI(14)", 
@@ -383,7 +382,7 @@ def run_master_futu_safe():
     ]
 
     market_breadth = (above_50ma / len(valid_tickers) * 100) if valid_tickers else 0
-    title_info = f"⚔️ 宏觀全景 ＋ 富途實時籌碼共振 V113 安全版 | 置頂 ES, QQQ, GLD, USO 基準 | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
+    title_info = f"⚔️ 宏觀全景 ＋ 富途實時籌碼共振 V113 | 置頂 ES, QQQ, GLD, USO 基準 | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
     matrix = [[f"Master Macro & Futu Live V113", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
 
     for m_row in macro_rows:
@@ -422,5 +421,3 @@ def run_master_futu_safe():
 
 if __name__ == "__main__":
     run_master_futu_safe()
-EOF
-python3 run_master_futu_safe.py
