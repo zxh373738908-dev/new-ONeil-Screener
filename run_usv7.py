@@ -12,11 +12,15 @@ from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings('ignore')
 
 # =====================================================================
-# 1. 系統配置中心 (已綁定專屬 Web App 與 工作表)
+# 1. 系統配置中心
 # =====================================================================
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxtNb3Wb6gsabX3B0rYf3Ws_xnRetjqEum3j2sfFjW-PdttgTNdV0qC1gK3Jkicme6_/exec"
 TARGET_SHEET = "us Screener"
 YTD_BASE_DATE = "2025-12-31"
+
+# 本地富途 MCP/REST API 配置
+FUTU_API_URL = "http://127.0.0.1:15000"
+FUTU_API_TOKEN = "my_secret_token_2026"
 
 MASTER_CURRENT = ["AMD", "ARW", "ATI", "FTNT", "HPE", "HST", "STT", "VIK", "VSAT"]
 SECTOR_LEADERS = ["FTI", "TDW", "PTEN", "VAL", "LBRT", "RIG", "NE", "BKR", "OIH", "XLE", "MU", "AMAT", "KLAC", "LRCX", "ADI", "DELL", "NTAP", "STX", "VLO"]
@@ -38,7 +42,7 @@ def get_universe():
 EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate']
 
 # =====================================================================
-# 2. 輔助計算函數
+# 2. 輔助計算函數與富途數據抓取
 # =====================================================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -58,7 +62,7 @@ def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 def fetch_info(t):
     ticker = yf.Ticker(t)
     try:
-        time.sleep(random.uniform(0.04, 0.08))
+        time.sleep(random.uniform(0.03, 0.06))
         info = ticker.info
         if info and 'industry' in info:
             info['industry'] = str(info['industry']).strip().replace('\t', '')
@@ -70,6 +74,40 @@ def fetch_info(t):
         return t, {'industry': 'Growth/Tech', 'sector': 'Technology', 'marketCap': mcap, 'revenueGrowth': 0.15}
     except: return t, {}
 
+def fetch_futu_capital_flow(t):
+    """從本地富途 API 即時抓取主力/超大單資金分佈"""
+    futu_code = f"US.{t.replace('-', '.')}"
+    url = f"{FUTU_API_URL}/api/stock/capital_distribution?code={futu_code}"
+    headers = {"Authorization": f"Bearer {FUTU_API_TOKEN}"}
+    try:
+        res = requests.get(url, headers=headers, timeout=2.5).json()
+        if res and isinstance(res, list) and len(res) > 0:
+            d = res[0]
+            super_net = (d.get('capital_in_super', 0) - d.get('capital_out_super', 0)) / 1e4
+            big_net = (d.get('capital_in_big', 0) - d.get('capital_out_big', 0)) / 1e4
+            small_net = (d.get('capital_in_small', 0) - d.get('capital_out_small', 0)) / 1e4
+            main_net = super_net + big_net
+            
+            flow_tag = ""
+            if main_net > 30 and small_net < 0:
+                flow_tag = "🔥機構吸籌"
+            elif main_net < -50 and small_net > 0:
+                flow_tag = "⚠️主力派發"
+            elif main_net > 10:
+                flow_tag = "🔴主力淨買"
+            elif main_net < -10:
+                flow_tag = "🟢主力淨賣"
+
+            return t, {
+                "MainNet": main_net,
+                "SuperNet": super_net,
+                "FlowTag": flow_tag,
+                "HasFutu": True
+            }
+    except Exception:
+        pass
+    return t, {"MainNet": 0.0, "SuperNet": 0.0, "FlowTag": "", "HasFutu": False}
+
 def sync_to_google_sheet(sheet_name, matrix):
     try:
         print(f"\n📡 正在傳送 {len(matrix)} 行數據至 Google 試算表 [{sheet_name}]...")
@@ -77,20 +115,20 @@ def sync_to_google_sheet(sheet_name, matrix):
         res = requests.post(WEBAPP_URL, json=payload, timeout=60)
         print(f"📥 伺服器狀態碼: {res.status_code}")
         if res.status_code == 200:
-            print(f"🎉 恭喜！V107 大師先勝獵殺版 已成功同步至 [{sheet_name}]！")
+            print(f"🎉 恭喜！V108 籌碼共振旗艦版 已成功同步至 [{sheet_name}]！")
     except Exception as e: 
         print(f"❌ 同步失敗: {e}")
 
 # =====================================================================
-# 3. 核心量化模型 V107 (Master Sun Tzu Momentum Engine)
+# 3. 核心量化模型 V108 (Sun Tzu + Futu Live Flow)
 # =====================================================================
-def run_master_sun_tzu_v107():
+def run_master_sun_tzu_v108():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     if "QQQ" not in universe: universe.append("QQQ")
     
     print("\n" + "="*60)
-    print(f"⚔️ [大師先勝獵殺量化系統 V107] 啟動 | 股票池: {len(universe)}")
+    print(f"⚔️ [富途籌碼共振量化系統 V108] 啟動 | 股票池: {len(universe)}")
 
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df, vol_df, high_df, low_df = hist_all['Close'], hist_all['Volume'], hist_all['High'], hist_all['Low']
@@ -122,11 +160,9 @@ def run_master_sun_tzu_v107():
             p, p_prev = float(c.iloc[-1]), float(c.iloc[-2])
             ema20 = float(c.ewm(span=20, adjust=False).mean().iloc[-1])
             
-            # (A) RPS 多週期評分
             r20, r60, r120 = r20_rank.get(t, 50), r60_rank.get(t, 50), r120_rank.get(t, 50)
             total_rank = round((0.2 * r20) + (0.4 * r60) + (0.4 * r120), 1)
 
-            # (B) RS/QQQ 動量線
             common_idx = c.index.intersection(qqq_c.index)
             rs_line = c.loc[common_idx] / qqq_c.loc[common_idx]
             rs_ma50 = rs_line.rolling(50).mean()
@@ -134,13 +170,11 @@ def run_master_sun_tzu_v107():
             rs_ma_up = bool(rs_ma50.iloc[-1] > rs_ma50.iloc[-5]) if len(rs_ma50.dropna()) >= 5 else False
             rs_strong = rs_above_ma and rs_ma_up
 
-            # (C) VWMA(20) 機構籌碼線
             cv = c * v
             vwma20 = (cv.rolling(20).sum() / v.rolling(20).sum()).iloc[-1]
             vwma60 = (cv.rolling(60).sum() / v.rolling(60).sum()).iloc[-1]
             p_above_vwma = p > vwma20 and p > vwma60
 
-            # (D) 微觀結構
             black_line = float(c.tail(60).max())
             red_line = float(c.iloc[-11:-1].max())
             is_breakout = p >= black_line * 0.985
@@ -148,7 +182,6 @@ def run_master_sun_tzu_v107():
             tightness = float((c.tail(15).std() / c.tail(15).mean()) * 100)
             is_vcp = tightness < 3.2
 
-            # (E) RSI 與 乖離率
             rsi_val = float(calculate_rsi(c, 14).iloc[-1])
             dist_to_ema20 = ((p - ema20) / ema20) * 100
             vol_ratio = float(v.iloc[-1] / v.tail(20).mean()) if len(v) >= 20 else 1.0
@@ -171,114 +204,122 @@ def run_master_sun_tzu_v107():
         except Exception:
             continue
 
-    # 基本面抓取
     infos = {}
     with ThreadPoolExecutor(max_workers=6) as executor:
         for t, info in executor.map(fetch_info, list(stock_analysis.keys())):
             if info: infos[t] = info
 
-    # 5. 大師級「先勝後戰」決策邏輯 (注入 ATI 彈簧 與 HPE 突破基因)
-    candidates = []
+    # 4. 初步排序選出候選股
+    pre_candidates = []
     for t, data in stock_analysis.items():
         if t not in infos: continue
         info = infos[t]
         ind = str(info.get('industry') or 'Unknown')
         sec = str(info.get('sector') or 'Unknown')
-        
         mcap_val = info.get('marketCap')
         mcap = (float(mcap_val) / 1e9) if (mcap_val and float(mcap_val) > 0) else data['EstMCap']
 
         is_master = t in MASTER_CURRENT
         if not is_master and any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
 
-        tr = data['TotalRank']
-        r20 = data['20R']
-        r60 = data['60R']
-        r120 = data['120R']
-        rsi = data['RSI']
-        dist = data['Dist20']
-        dist_fmt = f"{dist:+.1f}%"
+        tr, r20, r60, r120 = data['TotalRank'], data['20R'], data['60R'], data['120R']
+        rsi, dist = data['RSI'], data['Dist20']
 
-        # 🎯 大神專屬模式識別
-        # 模式一：ATI 經典黃金彈簧 (中長極強 + 短期洗盤完畢 + 貼線)
         is_springboard = (r120 >= 90.0 and r60 >= 85.0 and 20.0 <= r20 <= 60.0 and 42.0 <= rsi <= 62.0 and -3.0 <= dist <= 2.5)
-        
-        # 模式二：HPE 經典全動量放量突破
         is_hpe_breakout = (r120 >= 88.0 and r60 >= 88.0 and r20 >= 75.0 and data['IsBreakout'] and data['VolRatio'] > 1.15 and rsi <= 73.0)
 
-        # 結構標籤
-        tags = []
-        if is_springboard: tags.append("🔥黃金彈簧")
-        elif is_hpe_breakout: tags.append("🚀全週期突破")
-        elif data['IsBreakout']: tags.append("真空突破")
-        elif data['IsRedBreak']: tags.append("紅線突破")
-        
-        if data['VWMA_Up']: tags.append("籌碼多頭")
-        if data['RS_Strong']: tags.append("RS強")
-        if data['IsVCP']: tags.append("VCP收斂")
-        if data['VolRatio'] > 1.25: tags.append("爆量")
-        
-        if rsi >= 74: tags.append("⚠️過熱")
-        elif 42 <= rsi <= 60: tags.append("買區")
-        msg_str = "|".join(tags) if tags else "穩健"
-
-        # ⚔️ 嚴格決策指令
-        if is_master:
-            if dist < -8.0:
-                action = f"🛡️觸發硬止損({dist_fmt})"
-            elif tr < 70 or r120 < 75:
-                action = f"⚠️動量衰竭(換股)({dist_fmt})"
-            elif is_springboard or (-2.5 <= dist <= 2.0 and 42 <= rsi <= 60):
-                action = f"🎯安全加倉({dist_fmt})"
-            elif rsi >= 74 or dist > 8.0:
-                action = f"👑過熱持倉({dist_fmt})"
-            else:
-                action = f"👑標準持倉({dist_fmt})"
-        else:
-            # 1. 淘汰弱勢（大格局不強者堅決不碰）
-            if tr < 75 or r120 < 80 or not data['RS_Strong']:
-                action = f"⚠️淘汰弱勢({dist_fmt})"
-            
-            # 2. 嚴禁追高（防護盾）
-            elif rsi >= 74 or dist > 8.5:
-                action = f"👀過熱禁追({dist_fmt})"
-            
-            # 3. 🎯 大師級先勝開火信號
-            elif is_springboard:
-                action = f"🎯彈簧狙擊({dist_fmt})"  # 最具暴利潛力的買點！
-            elif is_hpe_breakout:
-                action = f"🎯突破狙擊({dist_fmt})"  # 最強加速主升浪！
-            elif tr >= 80 and (-2.5 <= dist <= 2.5 and 42 <= rsi <= 60) and (data['IsVCP'] or data['VWMA_Up']):
-                action = f"🎯回踩狙擊({dist_fmt})"
-            elif tr >= 80 and data['RS_Strong']:
-                action = f"🔍強勢觀察({dist_fmt})"
-            else:
-                action = f"🔍蓄勢待發({dist_fmt})"
-
-        # 評分系統 (彈簧形態與全週期突破給予最高優先權)
         final_score = tr
-        if is_springboard: final_score += 8   # 彈簧暴擊加分
-        if is_hpe_breakout: final_score += 7  # 突破加速加分
+        if is_springboard: final_score += 8
+        if is_hpe_breakout: final_score += 7
         if data['RS_Strong']: final_score += 4
         if data['VWMA_Up']: final_score += 3
         if rsi >= 74: final_score -= 8
         if dist < -8.0: final_score *= 0.5
         if is_master: final_score += 1000
 
-        candidates.append({
+        pre_candidates.append({
             "Ticker": t, "Name": str(info.get('shortName') or info.get('longName') or t)[:16],
             "Industry": ind, "Sector": sec, "MCap": mcap, "Price": data['Price'],
-            "1D": data['1D'], "Trend": data['Trend'], "20R": data['20R'], "60R": data['60R'],
-            "120R": data['120R'], "TotalRank": tr, "RSI": round(rsi, 1), "Action": action,
-            "Msg": msg_str, "ADR": data['ADR'], "Vol": data['VolRatio'], "YTD": data['YTD'],
-            "Score": final_score, "RS_Status": "🔥向上" if data['RS_Strong'] else "平緩"
+            "1D": data['1D'], "Trend": data['Trend'], "20R": r20, "60R": r60,
+            "120R": r120, "TotalRank": tr, "RSI": round(rsi, 1), "ADR": data['ADR'],
+            "Vol": data['VolRatio'], "YTD": data['YTD'], "Score": final_score,
+            "RS_Status": "🔥向上" if data['RS_Strong'] else "平緩", "Dist20": dist,
+            "IsBreakout": data['IsBreakout'], "IsRedBreak": data['IsRedBreak'],
+            "IsVCP": data['IsVCP'], "VWMA_Up": data['VWMA_Up'], "RS_Strong": data['RS_Strong'],
+            "is_springboard": is_springboard, "is_hpe_breakout": is_hpe_breakout
         })
 
-    candidates.sort(key=lambda x: x['Score'], reverse=True)
+    pre_candidates.sort(key=lambda x: x['Score'], reverse=True)
+
+    # 篩選前 35 檔標的並多線程查詢富途資金分佈
+    top_pool = pre_candidates[:35]
+    print(f"📡 正在從本地富途 API 即時抓取 {len(top_pool)} 檔龍頭的主力資金分佈...")
+    futu_flows = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for t, flow_data in executor.map(fetch_futu_capital_flow, [r['Ticker'] for r in top_pool]):
+            futu_flows[t] = flow_data
+
+    # 5. 結合富途籌碼生成最終指令與標籤
+    final_candidates = []
+    for r in top_pool:
+        t = r['Ticker']
+        is_master = t in MASTER_CURRENT
+        dist = r['Dist20']
+        dist_fmt = f"{dist:+.1f}%"
+        tr, rsi = r['TotalRank'], r['RSI']
+        flow_info = futu_flows.get(t, {"MainNet": 0.0, "SuperNet": 0.0, "FlowTag": "", "HasFutu": False})
+
+        tags = []
+        if r['is_springboard']: tags.append("🔥黃金彈簧")
+        elif r['is_hpe_breakout']: tags.append("🚀全週期突破")
+        elif r['IsBreakout']: tags.append("真空突破")
+        elif r['IsRedBreak']: tags.append("紅線突破")
+        
+        if r['VWMA_Up']: tags.append("籌碼多頭")
+        if r['RS_Strong']: tags.append("RS強")
+        if flow_info['FlowTag']: tags.append(flow_info['FlowTag'])  # 加入富途機構吸籌/派發標籤
+        if rsi >= 74: tags.append("⚠️過熱")
+        elif 42 <= rsi <= 60: tags.append("買區")
+        msg_str = "|".join(tags) if tags else "穩健"
+
+        # 作戰指令
+        if is_master:
+            if dist < -8.0: action = f"🛡️觸發硬止損({dist_fmt})"
+            elif tr < 70 or r['120R'] < 75: action = f"⚠️動量衰竭(換股)({dist_fmt})"
+            elif r['is_springboard'] or (-2.5 <= dist <= 2.0 and 42 <= rsi <= 60): action = f"🎯安全加倉({dist_fmt})"
+            elif rsi >= 74 or dist > 8.0: action = f"👑過熱持倉({dist_fmt})"
+            else: action = f"👑標準持倉({dist_fmt})"
+        else:
+            if tr < 75 or r['120R'] < 80 or not r['RS_Strong']:
+                action = f"⚠️淘汰弱勢({dist_fmt})"
+            elif rsi >= 74 or dist > 8.5:
+                action = f"👀過熱禁追({dist_fmt})"
+            elif r['is_springboard']:
+                action = f"🎯彈簧狙擊({dist_fmt})"
+            elif r['is_hpe_breakout']:
+                action = f"🎯突破狙擊({dist_fmt})"
+            elif tr >= 80 and (-2.5 <= dist <= 2.5 and 42 <= rsi <= 60) and (r['IsVCP'] or r['VWMA_Up']):
+                action = f"🎯回踩狙擊({dist_fmt})"
+            elif tr >= 80 and r['RS_Strong']:
+                action = f"🔍強勢觀察({dist_fmt})"
+            else:
+                action = f"🔍蓄勢待發({dist_fmt})"
+
+        # 籌碼金額格式化
+        main_net_val = flow_info['MainNet']
+        super_net_val = flow_info['SuperNet']
+        main_net_str = f"{'+' if main_net_val>0 else ''}{round(main_net_val, 1)}萬" if flow_info['HasFutu'] else "-"
+        super_net_str = f"{'+' if super_net_val>0 else ''}{round(super_net_val, 1)}萬" if flow_info['HasFutu'] else "-"
+
+        r['Action'] = action
+        r['Msg'] = msg_str
+        r['MainNetStr'] = main_net_str
+        r['SuperNetStr'] = super_net_str
+        final_candidates.append(r)
 
     # 挑選前 30 檔
     top_leaders, sec_count = [], {}
-    for r in candidates:
+    for r in final_candidates:
         is_master = r['Ticker'] in MASTER_CURRENT
         if not is_master:
             if sec_count.get(r['Sector'], 0) >= 5: continue
@@ -286,16 +327,16 @@ def run_master_sun_tzu_v107():
         top_leaders.append(r)
         if len(top_leaders) >= 30: break
 
-    # 6. 組裝輸出矩陣
+    # 6. 組裝 Google Sheet 矩陣 (包含富途主力籌碼專屬欄位)
     headers = [
         "排名", "代碼", "名稱/行業", "作戰指令(大師先勝)", "Msg結構標籤", 
         "Total Rank", "20R(1M)", "60R(3M)", "120R(6M)", "RSI(14)", 
-        "RS/QQQ動量", "60日走勢(圖)", "現價", "1D%", "今年YTD", 
+        "RS/QQQ動量", "主力淨流(萬$)", "超大單(萬$)", "60日走勢(圖)", "現價", "1D%", "今年YTD", 
         "市值(Bil)", "量比", "ADR%", "風控倉位", "硬止損價(-8%)", "綜合評分", "更新時間"
     ]
 
-    title_info = f"⚔️ 大師先勝獵殺系統 V107 | 裝載【ATI黃金彈簧】與【HPE突破加速】基因 | 嚴禁 RSI≥74 追高 | 嚴守 -8% 止損"
-    matrix = [[f"Master Sun Tzu Momentum V107", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
+    title_info = f"⚔️ 富途籌碼共振旗艦版 V108 | 裝載【富途LV2主力大單】＋【ATI彈簧/HPE突破】 | 嚴禁追高 | 嚴守 -8% 止損"
+    matrix = [[f"Master Sun Tzu Futu Live V108", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
 
     for i, r in enumerate(top_leaders):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
@@ -306,7 +347,7 @@ def run_master_sun_tzu_v107():
         matrix.append([
             f"T{i+1}", t_disp, f"{r['Ticker']} | {r['Industry'][:10]}", r['Action'], r['Msg'],
             f"{r['TotalRank']}分", f"{r['20R']}", f"{r['60R']}", f"{r['120R']}", f"{r['RSI']}",
-            r['RS_Status'], r['Trend'], f_price(r['Price']), f_1d(r['1D']), f_pct(r['YTD']),
+            r['RS_Status'], r['MainNetStr'], r['SuperNetStr'], r['Trend'], f_price(r['Price']), f_1d(r['1D']), f_pct(r['YTD']),
             f"${round(r['MCap'], 1)}B", f"{round(r['Vol'], 2)}x", f"{round(r['ADR'], 2)}%",
             pos_limit, f"{stop_loss_price}", disp_score, update_time
         ])
@@ -314,4 +355,4 @@ def run_master_sun_tzu_v107():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_master_sun_tzu_v107()
+    run_master_sun_tzu_v108()
