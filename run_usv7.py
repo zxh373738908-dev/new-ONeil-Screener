@@ -21,13 +21,15 @@ YTD_BASE_DATE = "2025-12-31"
 FUTU_API_URL = "http://127.0.0.1:15000"
 FUTU_API_TOKEN = "my_secret_token_2026"
 
+# 👑 核心持倉 + 科技七姐妹 (Mag 7) + 強勢板塊龍頭
 MASTER_CURRENT = ["AMD", "ARW", "ATI", "FTNT", "HPE", "HST", "STT", "VIK", "VSAT"]
+MAG_7 = ["NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA"]
 SECTOR_LEADERS = ["FTI", "TDW", "PTEN", "VAL", "LBRT", "RIG", "NE", "BKR", "OIH", "XLE", "MU", "AMAT", "KLAC", "LRCX", "ADI", "DELL", "NTAP", "STX", "VLO"]
 
 def get_universe():
-    core_watchlist = list(set(MASTER_CURRENT + SECTOR_LEADERS + [
+    core_watchlist = list(set(MASTER_CURRENT + MAG_7 + SECTOR_LEADERS + [
         "JBHT", "PRM", "ROIV", "ROKU", "TRGP", "YOU", "DAL", "GEV", "IBKR", 
-        "LLY", "MNST", "RDDT", "PWR", "IRDM", "QS", "VRT", "FSLR", "SNDK", "NVDA", "QQQ"
+        "LLY", "MNST", "RDDT", "PWR", "IRDM", "QS", "VRT", "FSLR", "SNDK", "QQQ"
     ]))
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -107,25 +109,51 @@ def sync_to_google_sheet(sheet_name, matrix):
         res = requests.post(WEBAPP_URL, json=payload, timeout=60)
         print(f"📥 伺服器狀態碼: {res.status_code}")
         if res.status_code == 200:
-            print(f"🎉 恭喜！V109 期權作戰全裝版 已成功同步至 [{sheet_name}]！")
+            print(f"🎉 恭喜！V110 宏觀全景版 已成功同步至 [{sheet_name}]！")
     except Exception as e: 
         print(f"❌ 同步失敗: {e}")
 
 # =====================================================================
-# 3. 核心量化模型 V109 (Option Master Strategy)
+# 3. 核心量化模型 V110 (Mag 7 + Macro Assets + Options)
 # =====================================================================
-def run_option_master_v109():
+def run_master_v110():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     if "QQQ" not in universe: universe.append("QQQ")
     
     print("\n" + "="*60)
-    print(f"⚔️ [大師期權先勝獵殺系統 V109] 啟動 | 股票池: {len(universe)}")
+    print(f"⚔️ [大師先勝獵殺量化系統 V110] 啟動 | 股票池總數: {len(universe)}")
 
+    # 1. 抓取宏觀資產 (ES期貨/SPY, QQQ, GLD黃金, USO原油, VIX) 與 七姐妹 (Mag 7)
+    print("🌍 正在獲取宏觀資產 (ES, QQQ, GLD, USO, VIX) 與科技七姐妹數據...")
+    macro_tickers = ["SPY", "QQQ", "^VIX", "GLD", "USO", "ES=F"] + MAG_7
+    try:
+        m_hist = yf.download(macro_tickers, period="5d", progress=False)['Close']
+        
+        # ES 期貨 / SPY 漲跌
+        es_series = m_hist['ES=F'].dropna() if 'ES=F' in m_hist and not m_hist['ES=F'].dropna().empty else m_hist['SPY'].dropna()
+        es_1d = (es_series.iloc[-1] / es_series.iloc[-2]) - 1 if len(es_series) >= 2 else 0.0
+        
+        # QQQ, GLD, USO, VIX 漲跌
+        qqq_1d = get_ret(m_hist['QQQ'].dropna(), 1)
+        gld_1d = get_ret(m_hist['GLD'].dropna(), 1)
+        uso_1d = get_ret(m_hist['USO'].dropna(), 1)
+        vix_val = float(m_hist['^VIX'].dropna().iloc[-1]) if '^VIX' in m_hist and not m_hist['^VIX'].dropna().empty else 16.0
+        
+        # 計算七姐妹 (Mag 7) 1D 平均漲幅
+        mag7_rets = [get_ret(m_hist[t].dropna(), 1) for t in MAG_7 if t in m_hist and len(m_hist[t].dropna()) >= 2]
+        mag7_avg_1d = float(np.mean(mag7_rets)) if mag7_rets else 0.0
+
+        macro_banner = f"ES:{es_1d*100:+.2f}% | QQQ:{qqq_1d*100:+.2f}% | GLD:{gld_1d*100:+.2f}% | USO:{uso_1d*100:+.2f}% | VIX:{vix_val:.1f} | 七姐妹均漲:{mag7_avg_1d*100:+.2f}%"
+    except Exception as e:
+        macro_banner = "ES:+0.00% | QQQ:+0.00% | GLD:+0.00% | USO:+0.00% | VIX:16.0 | 七姐妹:掃描中"
+
+    # 2. 全市場 2 年歷史 K 線下載
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df, vol_df, high_df, low_df = hist_all['Close'], hist_all['Volume'], hist_all['High'], hist_all['Low']
     qqq_c = close_df["QQQ"].dropna() if "QQQ" in close_df.columns else yf.Ticker("QQQ").history(period="2y")['Close']
 
+    # 多週期收益率與 RPS 排名
     ret_20, ret_60, ret_120 = {}, {}, {}
     for t in universe:
         if t not in close_df.columns or t == "QQQ": continue
@@ -143,13 +171,16 @@ def run_option_master_v109():
     r120_rank = (s_120.loc[valid_tickers].rank(pct=True) * 100).round(1).to_dict()
 
     stock_analysis = {}
+    above_50ma = 0
     for t in valid_tickers:
         try:
             c, v, h, l = close_df[t].dropna(), vol_df[t].dropna(), high_df[t].dropna(), low_df[t].dropna()
             if len(c) < 130 or len(v) < 60: continue
             
             p, p_prev = float(c.iloc[-1]), float(c.iloc[-2])
+            m50 = float(c.tail(50).mean())
             ema20 = float(c.ewm(span=20, adjust=False).mean().iloc[-1])
+            if p > m50: above_50ma += 1
             
             r20, r60, r120 = r20_rank.get(t, 50), r60_rank.get(t, 50), r120_rank.get(t, 50)
             total_rank = round((0.2 * r20) + (0.4 * r60) + (0.4 * r120), 1)
@@ -210,7 +241,8 @@ def run_option_master_v109():
         mcap = (float(mcap_val) / 1e9) if (mcap_val and float(mcap_val) > 0) else data['EstMCap']
 
         is_master = t in MASTER_CURRENT
-        if not is_master and any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
+        is_mag7 = t in MAG_7
+        if not is_master and not is_mag7 and any(ex.lower() in ind.lower() for ex in EXCLUDED): continue
 
         tr, r20, r60, r120 = data['TotalRank'], data['20R'], data['60R'], data['120R']
         rsi, dist = data['RSI'], data['Dist20']
@@ -226,6 +258,7 @@ def run_option_master_v109():
         if rsi >= 74: final_score -= 8
         if dist < -8.0: final_score *= 0.5
         if is_master: final_score += 1000
+        elif is_mag7: final_score += 500  # 七姐妹權重優先列入觀察
 
         pre_candidates.append({
             "Ticker": t, "Name": str(info.get('shortName') or info.get('longName') or t)[:16],
@@ -252,12 +285,14 @@ def run_option_master_v109():
     for r in top_pool:
         t = r['Ticker']
         is_master = t in MASTER_CURRENT
+        is_mag7 = t in MAG_7
         dist = r['Dist20']
         dist_fmt = f"{dist:+.1f}%"
         tr, rsi, p = r['TotalRank'], r['RSI'], r['Price']
         flow_info = futu_flows.get(t, {"MainNet": 0.0, "SuperNet": 0.0, "FlowTag": "", "HasFutu": False})
 
         tags = []
+        if is_mag7: tags.append("👑七姐妹")
         if r['is_springboard']: tags.append("🔥黃金彈簧")
         elif r['is_hpe_breakout']: tags.append("🚀全週期突破")
         elif r['IsBreakout']: tags.append("真空突破")
@@ -293,22 +328,16 @@ def run_option_master_v109():
             else:
                 action = f"🔍蓄勢待發({dist_fmt})"
 
-        # 💡 期權策略自動推導算法 (Option Master Engine)
+        # 期權策略自動推導
         option_strategy = ""
-        strike_target = round(p * 1.02, 1)  # 平值偏上方 2% 作為目標 Strike
+        strike_target = round(p * 1.02, 1)
         if "🎯" in action:
-            if r['is_springboard']:
-                option_strategy = f"🔥買45天Call (${strike_target})"
-            elif r['is_hpe_breakout']:
-                option_strategy = f"🚀買30天Call (${strike_target})"
-            else:
-                option_strategy = f"🎯買60天Call (${strike_target})"
-        elif "過熱" in action:
-            option_strategy = f"🛑禁買Call (可平倉止盈)"
-        elif "止損" in action or "淘汰" in action:
-            option_strategy = f"❌清倉期權/認賠"
-        else:
-            option_strategy = f"👀觀察候選 (暫無合約)"
+            if r['is_springboard']: option_strategy = f"🔥買45天Call (${strike_target})"
+            elif r['is_hpe_breakout']: option_strategy = f"🚀買30天Call (${strike_target})"
+            else: option_strategy = f"🎯買60天Call (${strike_target})"
+        elif "過熱" in action: option_strategy = f"🛑禁買Call (可平倉止盈)"
+        elif "止損" in action or "淘汰" in action: option_strategy = f"❌清倉期權/認賠"
+        else: option_strategy = f"👀觀察候選 (暫無合約)"
 
         main_net_val = flow_info['MainNet']
         super_net_val = flow_info['SuperNet']
@@ -325,7 +354,8 @@ def run_option_master_v109():
     top_leaders, sec_count = [], {}
     for r in final_candidates:
         is_master = r['Ticker'] in MASTER_CURRENT
-        if not is_master:
+        is_mag7 = r['Ticker'] in MAG_7
+        if not is_master and not is_mag7:
             if sec_count.get(r['Sector'], 0) >= 5: continue
             sec_count[r['Sector']] = sec_count.get(r['Sector'], 0) + 1
         top_leaders.append(r)
@@ -339,14 +369,23 @@ def run_option_master_v109():
         "市值(Bil)", "量比", "ADR%", "風控倉位", "硬止損價(-8%)", "綜合評分", "更新時間"
     ]
 
-    title_info = f"⚔️ 期權先勝獵殺系統 V109 | 自動匹配【Delta 0.6月期權合約】 | 非對稱鎖定風險 | 嚴守 -8% 止損"
-    matrix = [[f"Master Options Sniper V109", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
+    market_breadth = (above_50ma / len(valid_tickers) * 100) if valid_tickers else 0
+    title_info = f"⚔️ 宏觀全景獵殺 V110 | {macro_banner} | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
+    matrix = [[f"Master Macro & Mag7 V110", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
 
     for i, r in enumerate(top_leaders):
-        t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
+        if r['Ticker'] in MASTER_CURRENT:
+            t_disp = f"👑 {r['Ticker']}"
+            disp_score = f"{round(r['Score'] - 1000, 1)}"
+        elif r['Ticker'] in MAG_7:
+            t_disp = f"💎 {r['Ticker']}"
+            disp_score = f"{round(r['Score'] - 500, 1)}"
+        else:
+            t_disp = r['Ticker']
+            disp_score = f"{round(r['Score'], 1)}"
+
         pos_limit = "12.5%" if r['TotalRank'] >= 80 else "8.0%"
         stop_loss_price = f_price(r['Price'] * 0.92)
-        disp_score = f"{round(r['Score'] - 1000, 1)}" if r['Ticker'] in MASTER_CURRENT else f"{round(r['Score'], 1)}"
 
         matrix.append([
             f"T{i+1}", t_disp, f"{r['Ticker']} | {r['Industry'][:10]}", r['Action'], r['OptionStrategy'], r['Msg'],
@@ -359,4 +398,4 @@ def run_option_master_v109():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_option_master_v109()
+    run_master_v110()
