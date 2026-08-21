@@ -18,18 +18,22 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxtNb3Wb6gsabX3B0rYf3Ws_xn
 TARGET_SHEET = "us Screener"
 YTD_BASE_DATE = "2025-12-31"
 
+# 本地富途 MCP/REST API 連線配置
 FUTU_API_URL = "http://127.0.0.1:15000"
 FUTU_API_TOKEN = "my_secret_token_2026"
 
-# 👑 核心持倉 + 科技七姐妹 (Mag 7) + 強勢板塊龍頭
+# 宏觀基準資產 (置頂於表格)
+MACRO_BENCHMARKS = ["ES=F", "QQQ", "GLD", "USO"]
+
+# 👑 核心持倉 + 💎 科技七姐妹 + 強勢板塊龍頭
 MASTER_CURRENT = ["AMD", "ARW", "ATI", "FTNT", "HPE", "HST", "STT", "VIK", "VSAT"]
 MAG_7 = ["NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA"]
-SECTOR_LEADERS = ["FTI", "TDW", "PTEN", "VAL", "LBRT", "RIG", "NE", "BKR", "OIH", "XLE", "MU", "AMAT", "KLAC", "LRCX", "ADI", "DELL", "NTAP", "STX", "VLO"]
+SECTOR_LEADERS = ["FTI", "TDW", "PTEN", "VAL", "LBRT", "RIG", "NE", "BKR", "OIH", "XLE", "MU", "AMAT", "KLAC", "LRCX", "ADI", "DELL", "NTAP", "STX", "VLO", "BBY", "HPQ", "MPC"]
 
 def get_universe():
-    core_watchlist = list(set(MASTER_CURRENT + MAG_7 + SECTOR_LEADERS + [
+    core_watchlist = list(set(MASTER_CURRENT + MAG_7 + SECTOR_LEADERS + MACRO_BENCHMARKS + [
         "JBHT", "PRM", "ROIV", "ROKU", "TRGP", "YOU", "DAL", "GEV", "IBKR", 
-        "LLY", "MNST", "RDDT", "PWR", "IRDM", "QS", "VRT", "FSLR", "SNDK", "QQQ"
+        "LLY", "MNST", "RDDT", "PWR", "IRDM", "QS", "VRT", "FSLR", "SNDK", "SPY"
     ]))
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -63,7 +67,7 @@ def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 def fetch_info(t):
     ticker = yf.Ticker(t)
     try:
-        time.sleep(random.uniform(0.03, 0.06))
+        time.sleep(random.uniform(0.02, 0.05))
         info = ticker.info
         if info and 'industry' in info:
             info['industry'] = str(info['industry']).strip().replace('\t', '')
@@ -72,15 +76,19 @@ def fetch_info(t):
     try:
         fast = ticker.fast_info
         mcap = getattr(fast, 'market_cap', 0) or 0
-        return t, {'industry': 'Growth/Tech', 'sector': 'Technology', 'marketCap': mcap, 'revenueGrowth': 0.15}
+        return t, {'industry': 'Growth/Macro', 'sector': 'Technology', 'marketCap': mcap, 'revenueGrowth': 0.15}
     except: return t, {}
 
 def fetch_futu_capital_flow(t):
+    """從本機富途 API 抓取真實主力/超大單資金分佈"""
+    if t in MACRO_BENCHMARKS or t == "SPY":
+        return t, {"MainNet": 0.0, "SuperNet": 0.0, "FlowTag": "", "HasFutu": False}
+    
     futu_code = f"US.{t.replace('-', '.')}"
     url = f"{FUTU_API_URL}/api/stock/capital_distribution?code={futu_code}"
     headers = {"Authorization": f"Bearer {FUTU_API_TOKEN}"}
     try:
-        res = requests.get(url, headers=headers, timeout=1.5).json()
+        res = requests.get(url, headers=headers, timeout=1.8).json()
         if res and isinstance(res, list) and len(res) > 0:
             d = res[0]
             super_net = (d.get('capital_in_super', 0) - d.get('capital_out_super', 0)) / 1e4
@@ -89,10 +97,10 @@ def fetch_futu_capital_flow(t):
             main_net = super_net + big_net
             
             flow_tag = ""
-            if main_net > 30 and small_net < 0: flow_tag = "🔥機構吸籌"
-            elif main_net < -50 and small_net > 0: flow_tag = "⚠️主力派發"
-            elif main_net > 10: flow_tag = "🔴主力淨買"
-            elif main_net < -10: flow_tag = "🟢主力淨賣"
+            if main_net > 50 and small_net < -50: flow_tag = "🔥機構吸籌"
+            elif main_net < -100 and small_net > 50: flow_tag = "⚠️主力派發"
+            elif main_net > 20: flow_tag = "🔴主力淨買"
+            elif main_net < -20: flow_tag = "🟢主力淨賣"
 
             return t, {
                 "MainNet": main_net, "SuperNet": super_net,
@@ -109,54 +117,60 @@ def sync_to_google_sheet(sheet_name, matrix):
         res = requests.post(WEBAPP_URL, json=payload, timeout=60)
         print(f"📥 伺服器狀態碼: {res.status_code}")
         if res.status_code == 200:
-            print(f"🎉 恭喜！V110 宏觀全景版 已成功同步至 [{sheet_name}]！")
+            print(f"🎉 恭喜！V111 宏觀基準 ＋ 富途實盤版 已成功同步至 [{sheet_name}]！")
     except Exception as e: 
         print(f"❌ 同步失敗: {e}")
 
 # =====================================================================
-# 3. 核心量化模型 V110 (Mag 7 + Macro Assets + Options)
+# 3. 核心量化模型 V111 (Macro Pinned + True Futu Flow)
 # =====================================================================
-def run_master_v110():
+def run_master_v111():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
-    if "QQQ" not in universe: universe.append("QQQ")
     
-    print("\n" + "="*60)
-    print(f"⚔️ [大師先勝獵殺量化系統 V110] 啟動 | 股票池總數: {len(universe)}")
+    print("\n" + "="*65)
+    print(f"⚔️ [大師先勝獵殺系統 V111] 啟動 | 監測池: {len(universe)} | 宏觀 ES, QQQ, GLD, USO 置頂")
 
-    # 1. 抓取宏觀資產 (ES期貨/SPY, QQQ, GLD黃金, USO原油, VIX) 與 七姐妹 (Mag 7)
-    print("🌍 正在獲取宏觀資產 (ES, QQQ, GLD, USO, VIX) 與科技七姐妹數據...")
-    macro_tickers = ["SPY", "QQQ", "^VIX", "GLD", "USO", "ES=F"] + MAG_7
-    try:
-        m_hist = yf.download(macro_tickers, period="5d", progress=False)['Close']
-        
-        # ES 期貨 / SPY 漲跌
-        es_series = m_hist['ES=F'].dropna() if 'ES=F' in m_hist and not m_hist['ES=F'].dropna().empty else m_hist['SPY'].dropna()
-        es_1d = (es_series.iloc[-1] / es_series.iloc[-2]) - 1 if len(es_series) >= 2 else 0.0
-        
-        # QQQ, GLD, USO, VIX 漲跌
-        qqq_1d = get_ret(m_hist['QQQ'].dropna(), 1)
-        gld_1d = get_ret(m_hist['GLD'].dropna(), 1)
-        uso_1d = get_ret(m_hist['USO'].dropna(), 1)
-        vix_val = float(m_hist['^VIX'].dropna().iloc[-1]) if '^VIX' in m_hist and not m_hist['^VIX'].dropna().empty else 16.0
-        
-        # 計算七姐妹 (Mag 7) 1D 平均漲幅
-        mag7_rets = [get_ret(m_hist[t].dropna(), 1) for t in MAG_7 if t in m_hist and len(m_hist[t].dropna()) >= 2]
-        mag7_avg_1d = float(np.mean(mag7_rets)) if mag7_rets else 0.0
-
-        macro_banner = f"ES:{es_1d*100:+.2f}% | QQQ:{qqq_1d*100:+.2f}% | GLD:{gld_1d*100:+.2f}% | USO:{uso_1d*100:+.2f}% | VIX:{vix_val:.1f} | 七姐妹均漲:{mag7_avg_1d*100:+.2f}%"
-    except Exception as e:
-        macro_banner = "ES:+0.00% | QQQ:+0.00% | GLD:+0.00% | USO:+0.00% | VIX:16.0 | 七姐妹:掃描中"
-
-    # 2. 全市場 2 年歷史 K 線下載
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df, vol_df, high_df, low_df = hist_all['Close'], hist_all['Volume'], hist_all['High'], hist_all['Low']
     qqq_c = close_df["QQQ"].dropna() if "QQQ" in close_df.columns else yf.Ticker("QQQ").history(period="2y")['Close']
 
-    # 多週期收益率與 RPS 排名
+    # 1. 宏觀資產獨立處理 (ES, QQQ, GLD, USO)
+    macro_rows = []
+    macro_meta = [
+        {"Ticker": "ES=F", "Alt": "SPY", "Name": "🌐 ES (標普500期貨)", "Desc": "美股大盤風向標"},
+        {"Ticker": "QQQ", "Alt": "QQQ", "Name": "🌐 QQQ (納指100ETF)", "Desc": "科技動量基準"},
+        {"Ticker": "GLD", "Alt": "GLD", "Name": "🥇 GLD (黃金SPDR)", "Desc": "避險/抗通脹"},
+        {"Ticker": "USO", "Alt": "USO", "Name": "🛢️ USO (原油基金)", "Desc": "能源通脹風向標"}
+    ]
+
+    for m in macro_meta:
+        t = m['Ticker']
+        c_series = close_df[t].dropna() if t in close_df and not close_df[t].dropna().empty else (close_df[m['Alt']].dropna() if m['Alt'] in close_df else pd.Series())
+        if len(c_series) >= 2:
+            p_curr, p_prev = float(c_series.iloc[-1]), float(c_series.iloc[-2])
+            ret_1d = (p_curr / p_prev) - 1
+            rsi_val = float(calculate_rsi(c_series, 14).iloc[-1])
+            ytd_val = float((p_curr / c_series.loc[c_series.index <= YTD_BASE_DATE].iloc[-1]) - 1) if not c_series.loc[c_series.index <= YTD_BASE_DATE].empty else 0.0
+            
+            spark_data = ",".join([str(round(val, 2)) for val in c_series.tail(60).tolist()])
+            spark_formula = f'=SPARKLINE({{{spark_data}}}, {{"charttype","line";"linewidth",2;"color","orange"}})'
+            
+            macro_action = "📈偏多格局" if p_curr > c_series.tail(50).mean() else "📉偏弱震盪"
+            if rsi_val > 70: macro_action = "⚠️短期過熱"
+            elif rsi_val < 35: macro_action = "🟢超賣底背離"
+
+            macro_rows.append([
+                "🌐宏觀", m['Name'], m['Desc'], macro_action, "宏觀資產基準 (全市場錨點)",
+                "基準", "-", "-", "-", f"{round(rsi_val, 1)}",
+                "基準線", "-", "-", spark_formula, f_price(p_curr), f_1d(ret_1d), f_pct(ytd_val),
+                "-", "1.0x", "-", "-", "-", "-", update_time
+            ])
+
+    # 2. 多週期收益率與 RPS 排名
     ret_20, ret_60, ret_120 = {}, {}, {}
     for t in universe:
-        if t not in close_df.columns or t == "QQQ": continue
+        if t not in close_df.columns or t in MACRO_BENCHMARKS: continue
         c = close_df[t].dropna()
         if len(c) < 130: continue
         ret_20[t] = get_ret(c, 20)
@@ -209,7 +223,6 @@ def run_master_v110():
             vol_ratio = float(v.iloc[-1] / v.tail(20).mean()) if len(v) >= 20 else 1.0
             adr = float(((h - l) / l).tail(20).mean() * 100) if len(l) >= 20 else 2.0
             ytd = float((p / c.loc[c.index <= YTD_BASE_DATE].iloc[-1]) - 1) if not c.loc[c.index <= YTD_BASE_DATE].empty else 0.0
-
             est_mcap = (p * v.tail(20).mean() * 50) / 1e9 
 
             spark_data = ",".join([str(round(val, 2)) for val in c.tail(60).tolist()])
@@ -258,7 +271,7 @@ def run_master_v110():
         if rsi >= 74: final_score -= 8
         if dist < -8.0: final_score *= 0.5
         if is_master: final_score += 1000
-        elif is_mag7: final_score += 500  # 七姐妹權重優先列入觀察
+        elif is_mag7: final_score += 500
 
         pre_candidates.append({
             "Ticker": t, "Name": str(info.get('shortName') or info.get('longName') or t)[:16],
@@ -275,7 +288,8 @@ def run_master_v110():
     pre_candidates.sort(key=lambda x: x['Score'], reverse=True)
     top_pool = pre_candidates[:35]
 
-    # 多線程抓取富途主力籌碼
+    # 多線程從本機富途 API 提取即時主力資金流
+    print(f"📡 正在從本地富途 API 即時提取 {len(top_pool)} 檔標的之真實主力大單...")
     futu_flows = {}
     with ThreadPoolExecutor(max_workers=8) as executor:
         for t, flow_data in executor.map(fetch_futu_capital_flow, [r['Ticker'] for r in top_pool]):
@@ -305,7 +319,6 @@ def run_master_v110():
         elif 42 <= rsi <= 60: tags.append("買區")
         msg_str = "|".join(tags) if tags else "穩健"
 
-        # 作戰指令
         if is_master:
             if dist < -8.0: action = f"🛡️觸發硬止損({dist_fmt})"
             elif tr < 70 or r['120R'] < 75: action = f"⚠️動量衰竭(換股)({dist_fmt})"
@@ -328,7 +341,6 @@ def run_master_v110():
             else:
                 action = f"🔍蓄勢待發({dist_fmt})"
 
-        # 期權策略自動推導
         option_strategy = ""
         strike_target = round(p * 1.02, 1)
         if "🎯" in action:
@@ -361,7 +373,7 @@ def run_master_v110():
         top_leaders.append(r)
         if len(top_leaders) >= 30: break
 
-    # 6. 組裝輸出矩陣
+    # 4. 組裝 Google Sheet 矩陣
     headers = [
         "排名", "代碼", "名稱/行業", "作戰指令(大師先勝)", "🎯期權先勝策略指引", "Msg結構標籤", 
         "Total Rank", "20R(1M)", "60R(3M)", "120R(6M)", "RSI(14)", 
@@ -370,9 +382,14 @@ def run_master_v110():
     ]
 
     market_breadth = (above_50ma / len(valid_tickers) * 100) if valid_tickers else 0
-    title_info = f"⚔️ 宏觀全景獵殺 V110 | {macro_banner} | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
-    matrix = [[f"Master Macro & Mag7 V110", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
+    title_info = f"⚔️ 宏觀全景 ＋ 富途實時籌碼共振 V111 | 置頂 ES, QQQ, GLD, USO 基準 | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
+    matrix = [[f"Master Macro & Futu Live V111", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
 
+    # (A) 先加入置頂宏觀基準行
+    for m_row in macro_rows:
+        matrix.append(m_row)
+
+    # (B) 再加入個股領導隊列
     for i, r in enumerate(top_leaders):
         if r['Ticker'] in MASTER_CURRENT:
             t_disp = f"👑 {r['Ticker']}"
@@ -398,4 +415,4 @@ def run_master_v110():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_master_v110()
+    run_master_v111()
