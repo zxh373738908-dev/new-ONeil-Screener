@@ -1,3 +1,4 @@
+cat << 'EOF' > run_master_futu_safe.py
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -7,6 +8,7 @@ import json
 import warnings
 import time
 import random
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 warnings.filterwarnings('ignore')
@@ -63,7 +65,7 @@ def f_1d(v): return f"{v*100:+.2f}%" if not pd.isna(v) else "+0.00%"
 def fetch_info(t):
     ticker = yf.Ticker(t)
     try:
-        time.sleep(random.uniform(0.02, 0.05))
+        time.sleep(random.uniform(0.02, 0.04))
         info = ticker.info
         if info and 'industry' in info:
             info['industry'] = str(info['industry']).strip().replace('\t', '')
@@ -75,32 +77,36 @@ def fetch_info(t):
         return t, {'industry': 'Growth/Macro', 'sector': 'Technology', 'marketCap': mcap, 'revenueGrowth': 0.15}
     except: return t, {}
 
-def fetch_futu_capital_flow(t):
+# =====================================================================
+# 3. 安全無阻塞富途數據抓取 (透過本地 REST 端口，帶 1.5 秒硬超時防護)
+# =====================================================================
+def fetch_single_futu(t):
     if t in MACRO_BENCHMARKS or t == "SPY":
         return t, {"MainNet": 0.0, "SuperNet": 0.0, "FlowTag": "", "HasFutu": False}
     
     futu_code = f"US.{t.replace('-', '.')}"
     url = f"{FUTU_API_URL}/api/stock/capital_distribution?code={futu_code}"
-    headers = {"Authorization": f"Bearer {FUTU_API_TOKEN}"}
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {FUTU_API_TOKEN}"})
     try:
-        res = requests.get(url, headers=headers, timeout=1.8).json()
-        if res and isinstance(res, list) and len(res) > 0:
-            d = res[0]
-            super_net = (d.get('capital_in_super', 0) - d.get('capital_out_super', 0)) / 1e4
-            big_net = (d.get('capital_in_big', 0) - d.get('capital_out_big', 0)) / 1e4
-            small_net = (d.get('capital_in_small', 0) - d.get('capital_out_small', 0)) / 1e4
-            main_net = super_net + big_net
-            
-            flow_tag = ""
-            if main_net > 50 and small_net < -50: flow_tag = "🔥機構吸籌"
-            elif main_net < -100 and small_net > 50: flow_tag = "⚠️主力派發"
-            elif main_net > 20: flow_tag = "🔴主力淨買"
-            elif main_net < -20: flow_tag = "🟢主力淨賣"
+        with urllib.request.urlopen(req, timeout=1.5) as response:
+            res = json.loads(response.read().decode('utf-8'))
+            if res and isinstance(res, list) and len(res) > 0:
+                d = res[0]
+                super_net = (d.get('capital_in_super', 0) - d.get('capital_out_super', 0)) / 1e4
+                big_net = (d.get('capital_in_big', 0) - d.get('capital_out_big', 0)) / 1e4
+                small_net = (d.get('capital_in_small', 0) - d.get('capital_out_small', 0)) / 1e4
+                main_net = super_net + big_net
 
-            return t, {
-                "MainNet": main_net, "SuperNet": super_net,
-                "FlowTag": flow_tag, "HasFutu": True
-            }
+                flow_tag = ""
+                if main_net > 50 and small_net < -50: flow_tag = "🔥機構吸籌"
+                elif main_net < -100 and small_net > 50: flow_tag = "⚠️主力派發"
+                elif main_net > 20: flow_tag = "🔴主力淨買"
+                elif main_net < -20: flow_tag = "🟢主力淨賣"
+
+                return t, {
+                    "MainNet": main_net, "SuperNet": super_net,
+                    "FlowTag": flow_tag, "HasFutu": True
+                }
     except Exception:
         pass
     return t, {"MainNet": 0.0, "SuperNet": 0.0, "FlowTag": "", "HasFutu": False}
@@ -112,25 +118,25 @@ def sync_to_google_sheet(sheet_name, matrix):
         res = requests.post(WEBAPP_URL, json=payload, timeout=60)
         print(f"📥 伺服器狀態碼: {res.status_code}")
         if res.status_code == 200:
-            print(f"🎉 恭喜！V112 宏觀置頂 ＋ 富途籌碼版 已成功寫入 Google Sheet [{sheet_name}]！")
+            print(f"🎉 恭喜！本機富途真實數據已成功寫入 Google Sheet [{sheet_name}]！")
     except Exception as e: 
         print(f"❌ 同步失敗: {e}")
 
 # =====================================================================
-# 3. 核心量化模型 V112
+# 4. 核心量化模型執行
 # =====================================================================
-def run_master_v112():
+def run_master_futu_safe():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*65)
-    print(f"⚔️ [大師先勝獵殺系統 V112] 啟動 | 監測池: {len(universe)} | 宏觀 ES, QQQ, GLD, USO 置頂")
+    print(f"⚔️ [大師先勝獵殺系統 V113 安全版] 啟動 | 監測池: {len(universe)}")
 
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df, vol_df, high_df, low_df = hist_all['Close'], hist_all['Volume'], hist_all['High'], hist_all['Low']
     qqq_c = close_df["QQQ"].dropna() if "QQQ" in close_df.columns else yf.Ticker("QQQ").history(period="2y")['Close']
 
-    # 1. 宏觀資產獨立處理 (嚴格保證 25 欄長度)
+    # 1. 宏觀基準行
     macro_rows = []
     macro_meta = [
         {"Ticker": "ES=F", "Alt": "SPY", "Name": "🌐 ES (標普500期貨)", "Desc": "美股大盤風向標"},
@@ -155,7 +161,6 @@ def run_master_v112():
             if rsi_val > 70: macro_action = "⚠️短期過熱"
             elif rsi_val < 35: macro_action = "🟢超賣底背離"
 
-            # 💡 精確對齊 25 欄
             macro_rows.append([
                 "🌐宏觀", m['Name'], m['Desc'], macro_action, "宏觀資產基準 (全市場錨點)", "基準線",
                 "基準", "-", "-", "-", f"{round(rsi_val, 1)}",
@@ -163,7 +168,7 @@ def run_master_v112():
                 "-", "1.0x", "-", "-", "-", "-", update_time
             ])
 
-    # 2. 多週期收益率與 RPS 排名
+    # 2. 多週期收益率與 RPS
     ret_20, ret_60, ret_120 = {}, {}, {}
     for t in universe:
         if t not in close_df.columns or t in MACRO_BENCHMARKS: continue
@@ -284,10 +289,11 @@ def run_master_v112():
     pre_candidates.sort(key=lambda x: x['Score'], reverse=True)
     top_pool = pre_candidates[:35]
 
-    print(f"📡 正在從本地富途 API 即時提取 {len(top_pool)} 檔標的之真實主力大單...")
+    # 多線程從富途本地 REST 端口提取數據 (若未開 OpenD 會安全跳過，絕不卡死)
+    print(f"📡 正在從本地富途 API 提取 {len(top_pool)} 檔標的之真實主力大單...")
     futu_flows = {}
     with ThreadPoolExecutor(max_workers=8) as executor:
-        for t, flow_data in executor.map(fetch_futu_capital_flow, [r['Ticker'] for r in top_pool]):
+        for t, flow_data in executor.map(fetch_single_futu, [r['Ticker'] for r in top_pool]):
             futu_flows[t] = flow_data
 
     final_candidates = []
@@ -368,7 +374,7 @@ def run_master_v112():
         top_leaders.append(r)
         if len(top_leaders) >= 30: break
 
-    # 4. 組裝 Google Sheet 矩陣
+    # 4. 組裝輸出矩陣 (嚴格 25 欄對齊)
     headers = [
         "排名", "代碼", "名稱/行業", "作戰指令(大師先勝)", "🎯期權先勝策略指引", "Msg結構標籤", 
         "Total Rank", "20R(1M)", "60R(3M)", "120R(6M)", "RSI(14)", 
@@ -377,14 +383,12 @@ def run_master_v112():
     ]
 
     market_breadth = (above_50ma / len(valid_tickers) * 100) if valid_tickers else 0
-    title_info = f"⚔️ 宏觀全景 ＋ 富途實時籌碼共振 V112 | 置頂 ES, QQQ, GLD, USO 基準 | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
-    matrix = [[f"Master Macro & Futu Live V112", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
+    title_info = f"⚔️ 宏觀全景 ＋ 富途實時籌碼共振 V113 安全版 | 置頂 ES, QQQ, GLD, USO 基準 | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
+    matrix = [[f"Master Macro & Futu Live V113", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
 
-    # (A) 先加入置頂宏觀基準行
     for m_row in macro_rows:
         matrix.append(m_row)
 
-    # (B) 再加入個股領導隊列 (嚴格 25 欄)
     for i, r in enumerate(top_leaders):
         if r['Ticker'] in MASTER_CURRENT:
             t_disp = f"👑 {r['Ticker']}"
@@ -407,7 +411,6 @@ def run_master_v112():
             pos_limit, f"{stop_loss_price}", disp_score, update_time
         ])
 
-    # 💡 保險機制：自動對齊矩陣寬度（確保 100% 寫入成功）
     col_len = len(headers)
     for row in matrix:
         if len(row) < col_len:
@@ -418,4 +421,6 @@ def run_master_v112():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_master_v112()
+    run_master_futu_safe()
+EOF
+python3 run_master_futu_safe.py
