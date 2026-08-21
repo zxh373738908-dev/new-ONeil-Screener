@@ -18,14 +18,10 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxtNb3Wb6gsabX3B0rYf3Ws_xn
 TARGET_SHEET = "us Screener"
 YTD_BASE_DATE = "2025-12-31"
 
-# 本地富途 MCP/REST API 連線配置
 FUTU_API_URL = "http://127.0.0.1:15000"
 FUTU_API_TOKEN = "my_secret_token_2026"
 
-# 宏觀基準資產 (置頂於表格)
 MACRO_BENCHMARKS = ["ES=F", "QQQ", "GLD", "USO"]
-
-# 👑 核心持倉 + 💎 科技七姐妹 + 強勢板塊龍頭
 MASTER_CURRENT = ["AMD", "ARW", "ATI", "FTNT", "HPE", "HST", "STT", "VIK", "VSAT"]
 MAG_7 = ["NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA"]
 SECTOR_LEADERS = ["FTI", "TDW", "PTEN", "VAL", "LBRT", "RIG", "NE", "BKR", "OIH", "XLE", "MU", "AMAT", "KLAC", "LRCX", "ADI", "DELL", "NTAP", "STX", "VLO", "BBY", "HPQ", "MPC"]
@@ -80,7 +76,6 @@ def fetch_info(t):
     except: return t, {}
 
 def fetch_futu_capital_flow(t):
-    """從本機富途 API 抓取真實主力/超大單資金分佈"""
     if t in MACRO_BENCHMARKS or t == "SPY":
         return t, {"MainNet": 0.0, "SuperNet": 0.0, "FlowTag": "", "HasFutu": False}
     
@@ -117,25 +112,25 @@ def sync_to_google_sheet(sheet_name, matrix):
         res = requests.post(WEBAPP_URL, json=payload, timeout=60)
         print(f"📥 伺服器狀態碼: {res.status_code}")
         if res.status_code == 200:
-            print(f"🎉 恭喜！V111 宏觀基準 ＋ 富途實盤版 已成功同步至 [{sheet_name}]！")
+            print(f"🎉 恭喜！V112 宏觀置頂 ＋ 富途籌碼版 已成功寫入 Google Sheet [{sheet_name}]！")
     except Exception as e: 
         print(f"❌ 同步失敗: {e}")
 
 # =====================================================================
-# 3. 核心量化模型 V111 (Macro Pinned + True Futu Flow)
+# 3. 核心量化模型 V112
 # =====================================================================
-def run_master_v111():
+def run_master_v112():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     
     print("\n" + "="*65)
-    print(f"⚔️ [大師先勝獵殺系統 V111] 啟動 | 監測池: {len(universe)} | 宏觀 ES, QQQ, GLD, USO 置頂")
+    print(f"⚔️ [大師先勝獵殺系統 V112] 啟動 | 監測池: {len(universe)} | 宏觀 ES, QQQ, GLD, USO 置頂")
 
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df, vol_df, high_df, low_df = hist_all['Close'], hist_all['Volume'], hist_all['High'], hist_all['Low']
     qqq_c = close_df["QQQ"].dropna() if "QQQ" in close_df.columns else yf.Ticker("QQQ").history(period="2y")['Close']
 
-    # 1. 宏觀資產獨立處理 (ES, QQQ, GLD, USO)
+    # 1. 宏觀資產獨立處理 (嚴格保證 25 欄長度)
     macro_rows = []
     macro_meta = [
         {"Ticker": "ES=F", "Alt": "SPY", "Name": "🌐 ES (標普500期貨)", "Desc": "美股大盤風向標"},
@@ -160,8 +155,9 @@ def run_master_v111():
             if rsi_val > 70: macro_action = "⚠️短期過熱"
             elif rsi_val < 35: macro_action = "🟢超賣底背離"
 
+            # 💡 精確對齊 25 欄
             macro_rows.append([
-                "🌐宏觀", m['Name'], m['Desc'], macro_action, "宏觀資產基準 (全市場錨點)",
+                "🌐宏觀", m['Name'], m['Desc'], macro_action, "宏觀資產基準 (全市場錨點)", "基準線",
                 "基準", "-", "-", "-", f"{round(rsi_val, 1)}",
                 "基準線", "-", "-", spark_formula, f_price(p_curr), f_1d(ret_1d), f_pct(ytd_val),
                 "-", "1.0x", "-", "-", "-", "-", update_time
@@ -288,7 +284,6 @@ def run_master_v111():
     pre_candidates.sort(key=lambda x: x['Score'], reverse=True)
     top_pool = pre_candidates[:35]
 
-    # 多線程從本機富途 API 提取即時主力資金流
     print(f"📡 正在從本地富途 API 即時提取 {len(top_pool)} 檔標的之真實主力大單...")
     futu_flows = {}
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -382,14 +377,14 @@ def run_master_v111():
     ]
 
     market_breadth = (above_50ma / len(valid_tickers) * 100) if valid_tickers else 0
-    title_info = f"⚔️ 宏觀全景 ＋ 富途實時籌碼共振 V111 | 置頂 ES, QQQ, GLD, USO 基準 | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
-    matrix = [[f"Master Macro & Futu Live V111", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
+    title_info = f"⚔️ 宏觀全景 ＋ 富途實時籌碼共振 V112 | 置頂 ES, QQQ, GLD, USO 基準 | 50MA寬度:{market_breadth:.1f}% | 嚴守 -8% 止損"
+    matrix = [[f"Master Macro & Futu Live V112", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
 
     # (A) 先加入置頂宏觀基準行
     for m_row in macro_rows:
         matrix.append(m_row)
 
-    # (B) 再加入個股領導隊列
+    # (B) 再加入個股領導隊列 (嚴格 25 欄)
     for i, r in enumerate(top_leaders):
         if r['Ticker'] in MASTER_CURRENT:
             t_disp = f"👑 {r['Ticker']}"
@@ -412,7 +407,15 @@ def run_master_v111():
             pos_limit, f"{stop_loss_price}", disp_score, update_time
         ])
 
+    # 💡 保險機制：自動對齊矩陣寬度（確保 100% 寫入成功）
+    col_len = len(headers)
+    for row in matrix:
+        if len(row) < col_len:
+            row.extend(["-"] * (col_len - len(row)))
+        elif len(row) > col_len:
+            del row[col_len:]
+
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_master_v111()
+    run_master_v112()
