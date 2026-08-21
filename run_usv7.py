@@ -18,7 +18,6 @@ WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxtNb3Wb6gsabX3B0rYf3Ws_xn
 TARGET_SHEET = "us Screener"
 YTD_BASE_DATE = "2025-12-31"
 
-# 本地富途 MCP/REST API 配置
 FUTU_API_URL = "http://127.0.0.1:15000"
 FUTU_API_TOKEN = "my_secret_token_2026"
 
@@ -42,7 +41,7 @@ def get_universe():
 EXCLUDED = ['Commercial Banks', 'Savings Institutions', 'Mortgage', 'Real Estate']
 
 # =====================================================================
-# 2. 輔助計算函數與富途數據抓取
+# 2. 輔助計算函數
 # =====================================================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -75,12 +74,11 @@ def fetch_info(t):
     except: return t, {}
 
 def fetch_futu_capital_flow(t):
-    """從本地富途 API 即時抓取主力/超大單資金分佈"""
     futu_code = f"US.{t.replace('-', '.')}"
     url = f"{FUTU_API_URL}/api/stock/capital_distribution?code={futu_code}"
     headers = {"Authorization": f"Bearer {FUTU_API_TOKEN}"}
     try:
-        res = requests.get(url, headers=headers, timeout=2.5).json()
+        res = requests.get(url, headers=headers, timeout=1.5).json()
         if res and isinstance(res, list) and len(res) > 0:
             d = res[0]
             super_net = (d.get('capital_in_super', 0) - d.get('capital_out_super', 0)) / 1e4
@@ -89,20 +87,14 @@ def fetch_futu_capital_flow(t):
             main_net = super_net + big_net
             
             flow_tag = ""
-            if main_net > 30 and small_net < 0:
-                flow_tag = "🔥機構吸籌"
-            elif main_net < -50 and small_net > 0:
-                flow_tag = "⚠️主力派發"
-            elif main_net > 10:
-                flow_tag = "🔴主力淨買"
-            elif main_net < -10:
-                flow_tag = "🟢主力淨賣"
+            if main_net > 30 and small_net < 0: flow_tag = "🔥機構吸籌"
+            elif main_net < -50 and small_net > 0: flow_tag = "⚠️主力派發"
+            elif main_net > 10: flow_tag = "🔴主力淨買"
+            elif main_net < -10: flow_tag = "🟢主力淨賣"
 
             return t, {
-                "MainNet": main_net,
-                "SuperNet": super_net,
-                "FlowTag": flow_tag,
-                "HasFutu": True
+                "MainNet": main_net, "SuperNet": super_net,
+                "FlowTag": flow_tag, "HasFutu": True
             }
     except Exception:
         pass
@@ -115,26 +107,25 @@ def sync_to_google_sheet(sheet_name, matrix):
         res = requests.post(WEBAPP_URL, json=payload, timeout=60)
         print(f"📥 伺服器狀態碼: {res.status_code}")
         if res.status_code == 200:
-            print(f"🎉 恭喜！V108 籌碼共振旗艦版 已成功同步至 [{sheet_name}]！")
+            print(f"🎉 恭喜！V109 期權作戰全裝版 已成功同步至 [{sheet_name}]！")
     except Exception as e: 
         print(f"❌ 同步失敗: {e}")
 
 # =====================================================================
-# 3. 核心量化模型 V108 (Sun Tzu + Futu Live Flow)
+# 3. 核心量化模型 V109 (Option Master Strategy)
 # =====================================================================
-def run_master_sun_tzu_v108():
+def run_option_master_v109():
     update_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     universe = get_universe()
     if "QQQ" not in universe: universe.append("QQQ")
     
     print("\n" + "="*60)
-    print(f"⚔️ [富途籌碼共振量化系統 V108] 啟動 | 股票池: {len(universe)}")
+    print(f"⚔️ [大師期權先勝獵殺系統 V109] 啟動 | 股票池: {len(universe)}")
 
     hist_all = yf.download(universe, period="2y", progress=False, threads=True)
     close_df, vol_df, high_df, low_df = hist_all['Close'], hist_all['Volume'], hist_all['High'], hist_all['Low']
     qqq_c = close_df["QQQ"].dropna() if "QQQ" in close_df.columns else yf.Ticker("QQQ").history(period="2y")['Close']
 
-    # 多週期收益率與 RPS 排名
     ret_20, ret_60, ret_120 = {}, {}, {}
     for t in universe:
         if t not in close_df.columns or t == "QQQ": continue
@@ -209,7 +200,6 @@ def run_master_sun_tzu_v108():
         for t, info in executor.map(fetch_info, list(stock_analysis.keys())):
             if info: infos[t] = info
 
-    # 4. 初步排序選出候選股
     pre_candidates = []
     for t, data in stock_analysis.items():
         if t not in infos: continue
@@ -250,23 +240,21 @@ def run_master_sun_tzu_v108():
         })
 
     pre_candidates.sort(key=lambda x: x['Score'], reverse=True)
-
-    # 篩選前 35 檔標的並多線程查詢富途資金分佈
     top_pool = pre_candidates[:35]
-    print(f"📡 正在從本地富途 API 即時抓取 {len(top_pool)} 檔龍頭的主力資金分佈...")
+
+    # 多線程抓取富途主力籌碼
     futu_flows = {}
     with ThreadPoolExecutor(max_workers=8) as executor:
         for t, flow_data in executor.map(fetch_futu_capital_flow, [r['Ticker'] for r in top_pool]):
             futu_flows[t] = flow_data
 
-    # 5. 結合富途籌碼生成最終指令與標籤
     final_candidates = []
     for r in top_pool:
         t = r['Ticker']
         is_master = t in MASTER_CURRENT
         dist = r['Dist20']
         dist_fmt = f"{dist:+.1f}%"
-        tr, rsi = r['TotalRank'], r['RSI']
+        tr, rsi, p = r['TotalRank'], r['RSI'], r['Price']
         flow_info = futu_flows.get(t, {"MainNet": 0.0, "SuperNet": 0.0, "FlowTag": "", "HasFutu": False})
 
         tags = []
@@ -277,7 +265,7 @@ def run_master_sun_tzu_v108():
         
         if r['VWMA_Up']: tags.append("籌碼多頭")
         if r['RS_Strong']: tags.append("RS強")
-        if flow_info['FlowTag']: tags.append(flow_info['FlowTag'])  # 加入富途機構吸籌/派發標籤
+        if flow_info['FlowTag']: tags.append(flow_info['FlowTag'])
         if rsi >= 74: tags.append("⚠️過熱")
         elif 42 <= rsi <= 60: tags.append("買區")
         msg_str = "|".join(tags) if tags else "穩健"
@@ -305,7 +293,23 @@ def run_master_sun_tzu_v108():
             else:
                 action = f"🔍蓄勢待發({dist_fmt})"
 
-        # 籌碼金額格式化
+        # 💡 期權策略自動推導算法 (Option Master Engine)
+        option_strategy = ""
+        strike_target = round(p * 1.02, 1)  # 平值偏上方 2% 作為目標 Strike
+        if "🎯" in action:
+            if r['is_springboard']:
+                option_strategy = f"🔥買45天Call (${strike_target})"
+            elif r['is_hpe_breakout']:
+                option_strategy = f"🚀買30天Call (${strike_target})"
+            else:
+                option_strategy = f"🎯買60天Call (${strike_target})"
+        elif "過熱" in action:
+            option_strategy = f"🛑禁買Call (可平倉止盈)"
+        elif "止損" in action or "淘汰" in action:
+            option_strategy = f"❌清倉期權/認賠"
+        else:
+            option_strategy = f"👀觀察候選 (暫無合約)"
+
         main_net_val = flow_info['MainNet']
         super_net_val = flow_info['SuperNet']
         main_net_str = f"{'+' if main_net_val>0 else ''}{round(main_net_val, 1)}萬" if flow_info['HasFutu'] else "-"
@@ -313,11 +317,11 @@ def run_master_sun_tzu_v108():
 
         r['Action'] = action
         r['Msg'] = msg_str
+        r['OptionStrategy'] = option_strategy
         r['MainNetStr'] = main_net_str
         r['SuperNetStr'] = super_net_str
         final_candidates.append(r)
 
-    # 挑選前 30 檔
     top_leaders, sec_count = [], {}
     for r in final_candidates:
         is_master = r['Ticker'] in MASTER_CURRENT
@@ -327,16 +331,16 @@ def run_master_sun_tzu_v108():
         top_leaders.append(r)
         if len(top_leaders) >= 30: break
 
-    # 6. 組裝 Google Sheet 矩陣 (包含富途主力籌碼專屬欄位)
+    # 6. 組裝輸出矩陣
     headers = [
-        "排名", "代碼", "名稱/行業", "作戰指令(大師先勝)", "Msg結構標籤", 
+        "排名", "代碼", "名稱/行業", "作戰指令(大師先勝)", "🎯期權先勝策略指引", "Msg結構標籤", 
         "Total Rank", "20R(1M)", "60R(3M)", "120R(6M)", "RSI(14)", 
-        "RS/QQQ動量", "主力淨流(萬$)", "超大單(萬$)", "60日走勢(圖)", "現價", "1D%", "今年YTD", 
+        "RS/QQQ動量", "主力淨流", "超大單", "60日走勢(圖)", "現價", "1D%", "今年YTD", 
         "市值(Bil)", "量比", "ADR%", "風控倉位", "硬止損價(-8%)", "綜合評分", "更新時間"
     ]
 
-    title_info = f"⚔️ 富途籌碼共振旗艦版 V108 | 裝載【富途LV2主力大單】＋【ATI彈簧/HPE突破】 | 嚴禁追高 | 嚴守 -8% 止損"
-    matrix = [[f"Master Sun Tzu Futu Live V108", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
+    title_info = f"⚔️ 期權先勝獵殺系統 V109 | 自動匹配【Delta 0.6月期權合約】 | 非對稱鎖定風險 | 嚴守 -8% 止損"
+    matrix = [[f"Master Options Sniper V109", f"更新: {update_time}", title_info] + [""] * (len(headers) - 3), headers]
 
     for i, r in enumerate(top_leaders):
         t_disp = f"👑 {r['Ticker']}" if r['Ticker'] in MASTER_CURRENT else r['Ticker']
@@ -345,7 +349,7 @@ def run_master_sun_tzu_v108():
         disp_score = f"{round(r['Score'] - 1000, 1)}" if r['Ticker'] in MASTER_CURRENT else f"{round(r['Score'], 1)}"
 
         matrix.append([
-            f"T{i+1}", t_disp, f"{r['Ticker']} | {r['Industry'][:10]}", r['Action'], r['Msg'],
+            f"T{i+1}", t_disp, f"{r['Ticker']} | {r['Industry'][:10]}", r['Action'], r['OptionStrategy'], r['Msg'],
             f"{r['TotalRank']}分", f"{r['20R']}", f"{r['60R']}", f"{r['120R']}", f"{r['RSI']}",
             r['RS_Status'], r['MainNetStr'], r['SuperNetStr'], r['Trend'], f_price(r['Price']), f_1d(r['1D']), f_pct(r['YTD']),
             f"${round(r['MCap'], 1)}B", f"{round(r['Vol'], 2)}x", f"{round(r['ADR'], 2)}%",
@@ -355,4 +359,4 @@ def run_master_sun_tzu_v108():
     sync_to_google_sheet(TARGET_SHEET, matrix)
 
 if __name__ == "__main__":
-    run_master_sun_tzu_v108()
+    run_option_master_v109()
